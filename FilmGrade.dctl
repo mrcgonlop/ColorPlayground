@@ -40,6 +40,25 @@ DEFINE_UI_PARAMS(purity_red, Purity Red, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.
 DEFINE_UI_PARAMS(purity_green, Purity Green, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
 DEFINE_UI_PARAMS(purity_blue, Purity Blue, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
 
+// Channel Crosstalk (Film Dye Interaction)
+DEFINE_UI_PARAMS(enable_crosstalk, Enable Channel Crosstalk, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(crosstalk_rg, Red→Green Crosstalk, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
+DEFINE_UI_PARAMS(crosstalk_rb, Red→Blue Crosstalk, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
+DEFINE_UI_PARAMS(crosstalk_gr, Green→Red Crosstalk, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
+DEFINE_UI_PARAMS(crosstalk_gb, Green→Blue Crosstalk, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
+DEFINE_UI_PARAMS(crosstalk_br, Blue→Red Crosstalk, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
+DEFINE_UI_PARAMS(crosstalk_bg, Blue→Green Crosstalk, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
+
+// Shadow/Midtone/Highlight Hue Shifts (additive to Lum→Hue curve)
+DEFINE_UI_PARAMS(shadow_hue_shift, Shadow Hue Shift deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
+DEFINE_UI_PARAMS(midtone_hue_shift, Midtone Hue Shift deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
+DEFINE_UI_PARAMS(highlight_hue_shift, Highlight Hue Shift deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
+
+// Per-Channel Gamut Compression
+DEFINE_UI_PARAMS(gamut_compress_r, Gamut Compress Red, DCTLUI_SLIDER_FLOAT, 0.03, 0.01, 0.15, 0.01)
+DEFINE_UI_PARAMS(gamut_compress_g, Gamut Compress Green, DCTLUI_SLIDER_FLOAT, 0.03, 0.01, 0.15, 0.01)
+DEFINE_UI_PARAMS(gamut_compress_b, Gamut Compress Blue, DCTLUI_SLIDER_FLOAT, 0.03, 0.01, 0.15, 0.01)
+
 // ============================================================================
 // MATRIX DEFINITIONS & HELPER FUNCTIONS
 // ============================================================================
@@ -200,6 +219,24 @@ __DEVICE__ inline float3 NonLinearGamutMapping(float3 in, float p, float m, floa
     return out;
 }
 
+// Per-channel gamut compression (separate power for R, G, B)
+__DEVICE__ inline float3 NonLinearGamutMappingPerChannel(float3 in, float p_r, float p_g, float p_b, float m, float t0) {
+    float mx = max3(in.x, in.y, in.z);
+
+    float3 rats;
+    rats.x = mx == 0.0f ? 0.0f : in.x / mx;
+    rats.y = mx == 0.0f ? 0.0f : in.y / mx;
+    rats.z = mx == 0.0f ? 0.0f : in.z / mx;
+
+    // Apply different power per channel
+    rats.x = powerptoe(rats.x, p_r, m, t0);
+    rats.y = powerptoe(rats.y, p_g, m, t0);
+    rats.z = powerptoe(rats.z, p_b, m, t0);
+
+    float3 out = rats * mx;
+    return out;
+}
+
 __DEVICE__ inline float3 EnergyCorrection(float3 pre, float3 post, float3x3 mt) {
     // Preserve luminance/energy after color operations
     float PI_LOCAL = 3.14159265359f;
@@ -264,6 +301,19 @@ __DEVICE__ inline float3x3 simpleInsetMatrix(float red, float green, float blue,
     M = inv ? inv_f33(M) : M;
 
     return M;
+}
+
+// Channel crosstalk matrix (film dye interaction)
+__DEVICE__ inline float3x3 crosstalkMatrix(float rg, float rb, float gr, float gb, float br, float bg) {
+    // Matrix maps input RGB to output RGB with crosstalk
+    // Each output channel is influenced by other input channels
+    // Example: output_R = input_R + gr*input_G + br*input_B
+
+    float3 redcoeff   = make_float3(1.0f, gr, br);      // R output = R + gr*G + br*B
+    float3 greencoeff = make_float3(rg, 1.0f, bg);      // G output = rg*R + G + bg*B
+    float3 bluecoeff  = make_float3(rb, gb, 1.0f);      // B output = rb*R + gb*G + B
+
+    return make_float3x3(redcoeff, greencoeff, bluecoeff);
 }
 
 // ============================================================================
@@ -451,7 +501,17 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     // ========================================================================
     if (enable_gamut_compression) {
         float3 rgb_copy = rgb;
-        rgb = NonLinearGamutMapping(rgb, gamut_compress_power, 0.0f, 1.0f);
+        rgb = NonLinearGamutMappingPerChannel(rgb, gamut_compress_r, gamut_compress_g, gamut_compress_b, 0.0f, 1.0f);
+        rgb = EnergyCorrection(rgb_copy, rgb, matrix_rec709_to_xyz);
+    }
+
+    // ========================================================================
+    // 4b. CHANNEL CROSSTALK (film dye interaction)
+    // ========================================================================
+    if (enable_crosstalk) {
+        float3 rgb_copy = rgb;
+        float3x3 ct_matrix = crosstalkMatrix(crosstalk_rg, crosstalk_rb, crosstalk_gr, crosstalk_gb, crosstalk_br, crosstalk_bg);
+        rgb = vdot(ct_matrix, rgb);
         rgb = EnergyCorrection(rgb_copy, rgb, matrix_rec709_to_xyz);
     }
 
@@ -475,9 +535,32 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         }
     }
 
-    // LUM→HUE: Hue rotation based on luminance
-    if (enable_lum_to_hue && sat > 0.001f) {
-        float hue_shift_deg = cubic_spline_interpolate(lum, lum_to_hue, lum_to_hue_size);
+    // LUM→HUE: Hue rotation based on luminance (curve + tripartite sliders)
+    if ((enable_lum_to_hue || _fabs(shadow_hue_shift) > 0.01f || _fabs(midtone_hue_shift) > 0.01f || _fabs(highlight_hue_shift) > 0.01f) && sat > 0.001f) {
+        float hue_shift_deg = 0.0f;
+
+        // Add curve contribution
+        if (enable_lum_to_hue) {
+            hue_shift_deg += cubic_spline_interpolate(lum, lum_to_hue, lum_to_hue_size);
+        }
+
+        // Add tripartite slider contribution
+        // Smooth blending zones: shadow (0-0.18), midtone (0.18-0.5), highlight (0.5-1.0)
+        if (lum < 0.18f) {
+            // Shadow zone: full shadow shift, blend to midtone
+            float shadow_weight = 1.0f - lum / 0.18f;
+            float midtone_weight = lum / 0.18f;
+            hue_shift_deg += shadow_hue_shift * shadow_weight + midtone_hue_shift * midtone_weight;
+        } else if (lum < 0.5f) {
+            // Midtone zone: blend from midtone to highlight
+            float midtone_weight = (0.5f - lum) / (0.5f - 0.18f);
+            float highlight_weight = (lum - 0.18f) / (0.5f - 0.18f);
+            hue_shift_deg += midtone_hue_shift * midtone_weight + highlight_hue_shift * highlight_weight;
+        } else {
+            // Highlight zone: full highlight shift
+            hue_shift_deg += highlight_hue_shift;
+        }
+
         if (_fabs(hue_shift_deg) > 0.01f) {
             const float DEG_TO_RAD = 3.14159265359f / 180.0f;
             opp = rotate_hue(opp, hue_shift_deg * DEG_TO_RAD);
