@@ -23,6 +23,16 @@ DEFINE_UI_PARAMS(hue_shift, Hue Shift, DCTLUI_SLIDER_FLOAT, 0.0, -180.0, 180.0, 
 DEFINE_UI_PARAMS(highlight_desat, Highlight Desaturation, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
 DEFINE_UI_PARAMS(shadow_desat, Shadow Desaturation, DCTLUI_SLIDER_FLOAT, 0.3, 0.0, 1.0, 0.01)
 
+// Hue Loops (Saturation-based hue rotation)
+DEFINE_UI_PARAMS(enable_hue_loops, Enable Hue Loops, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(hue_loop_red, Red Hue Loop, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.1)
+DEFINE_UI_PARAMS(hue_loop_green, Green Hue Loop, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.1)
+DEFINE_UI_PARAMS(hue_loop_blue, Blue Hue Loop, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.1)
+DEFINE_UI_PARAMS(hue_loop_cyan, Cyan Hue Loop, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.1)
+DEFINE_UI_PARAMS(hue_loop_magenta, Magenta Hue Loop, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.1)
+DEFINE_UI_PARAMS(hue_loop_yellow, Yellow Hue Loop, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.1)
+DEFINE_UI_PARAMS(hue_loop_strength, Hue Loop Saturation Threshold, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
+
 typedef struct {
   float3 x, y, z;
 } float3x3;
@@ -149,6 +159,16 @@ __DEVICE__ float fmod_positive(float a, float b) {
 
 __DEVICE__ float clamp(float x, float min_val, float max_val) {
     return _fmaxf(min_val, _fminf(max_val, x));
+}
+
+// Gaussian window function for hue loops
+// Returns a weight from 0.0 to 1.0 based on distance from center hue
+__DEVICE__ float gauss_window(float hue, float center, float width) {
+    float diff = hue - center;
+    // Handle hue wraparound at 0/360 degrees
+    if (diff > 180.0f) diff -= 360.0f;
+    if (diff < -180.0f) diff += 360.0f;
+    return _expf(-(diff * diff) / (2.0f * width * width));
 }
 
 // Matrix 3x3 inversion function
@@ -1052,7 +1072,41 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     // 4. Saturation → Saturation (non-linear compression)
     float sat_mapped = cubic_spline_interpolate(s, satVsSat, size_satVsSat);
     s = clamp(sat_mapped, 0.0f, (working_colorspace == 1) ? 2.0f : 1.0f);
-    
+
+    // 4b. HUE LOOPS: Saturation → Hue (advanced color grading)
+    // This creates "spiral" paths in color space where hue rotates as saturation increases
+    // Different for each primary/secondary hue region
+    if (enable_hue_loops) {
+        // Calculate saturation factor (0.0 at low sat, 1.0 at high sat)
+        // Uses hue_loop_strength as the threshold
+        float sat_factor = _fmaxf(0.0f, (s - hue_loop_strength) / (1.0f - hue_loop_strength));
+        sat_factor = sat_factor * sat_factor; // Quadratic easing for smooth transition
+
+        // Calculate hue region weights using Gaussian windows
+        // Primary hues (60° width for broader influence)
+        float weight_red = gauss_window(h, 0.0f, 60.0f);
+        float weight_green = gauss_window(h, 120.0f, 60.0f);
+        float weight_blue = gauss_window(h, 240.0f, 60.0f);
+
+        // Secondary hues (45° width for tighter control)
+        float weight_yellow = gauss_window(h, 60.0f, 45.0f);
+        float weight_cyan = gauss_window(h, 180.0f, 45.0f);
+        float weight_magenta = gauss_window(h, 300.0f, 45.0f);
+
+        // Calculate weighted hue shift for this saturation level
+        float hue_loop_shift = sat_factor * (
+            hue_loop_red * weight_red +
+            hue_loop_green * weight_green +
+            hue_loop_blue * weight_blue +
+            hue_loop_yellow * weight_yellow +
+            hue_loop_cyan * weight_cyan +
+            hue_loop_magenta * weight_magenta
+        );
+
+        // Apply the saturation-based hue rotation
+        h = fmod_positive(h + hue_loop_shift, 360.0f);
+    }
+
     // 5. Saturation → Luminance (film density)
     float lum_offset_sat = cubic_spline_interpolate(s, satVsLum, size_satVsLum);
     v = clamp(v + lum_offset_sat, 0.0f, 1.0f);

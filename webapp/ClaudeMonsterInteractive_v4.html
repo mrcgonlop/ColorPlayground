@@ -1,0 +1,1917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Film Emulation Preset Creator v4 - Professional DCTL Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --ui-scale: 1.0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #0d0d0d;
+            color: #e0e0e0;
+            padding: calc(20px * var(--ui-scale));
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 2600px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 5px;
+            color: #fff;
+            font-size: calc(32px * var(--ui-scale));
+            font-weight: 700;
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 25px;
+            color: #888;
+            font-size: calc(14px * var(--ui-scale));
+        }
+
+        .scale-control {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            padding: 15px;
+            z-index: 1000;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .scale-label {
+            font-size: 12px;
+            color: #888;
+            font-weight: 600;
+        }
+
+        .scale-slider {
+            width: 150px;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 520px;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .left-panel {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 12px;
+            padding: 25px;
+            max-height: calc(100vh - 100px);
+            overflow-y: auto;
+        }
+
+        .left-panel::-webkit-scrollbar {
+            width: 12px;
+        }
+
+        .left-panel::-webkit-scrollbar-track {
+            background: #0d0d0d;
+            border-radius: 6px;
+        }
+
+        .left-panel::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 6px;
+        }
+
+        .right-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .controls-section {
+            background: #0d0d0d;
+            border: 1px solid #2a2a2a;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .vectorscope-panel {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .test-image-panel {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .preset-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .preset-btn {
+            padding: 10px;
+            background: linear-gradient(135deg, #2a2a2a 0%, #1f1f1f 100%);
+            border: 1px solid #3a3a3a;
+            border-radius: 8px;
+            color: #e0e0e0;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .preset-btn:hover {
+            background: linear-gradient(135deg, #3a3a3a 0%, #2f2f2f 100%);
+            border-color: #4a4a4a;
+            transform: translateY(-1px);
+        }
+
+        .preset-btn.active {
+            background: linear-gradient(135deg, #0066cc 0%, #0055aa 100%);
+            border-color: #0077ee;
+            color: white;
+        }
+
+        .export-section {
+            display: grid;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .export-btn {
+            padding: 12px;
+            background: linear-gradient(135deg, #00aa44 0%, #008833 100%);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .export-btn:hover {
+            background: linear-gradient(135deg, #00bb55 0%, #009944 100%);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 170, 68, 0.3);
+        }
+
+        .export-btn.secondary {
+            background: linear-gradient(135deg, #cc6600 0%, #aa5500 100%);
+        }
+
+        .export-btn.secondary:hover {
+            background: linear-gradient(135deg, #ee7700 0%, #cc6600 100%);
+            box-shadow: 0 4px 12px rgba(204, 102, 0, 0.3);
+        }
+
+        .section-header {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+            margin: 20px 0 15px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #2a2a2a;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .section-header:first-child {
+            margin-top: 0;
+        }
+
+        .curve-section {
+            background: #0d0d0d;
+            border: 1px solid #2a2a2a;
+            border-radius: 10px;
+            padding: 18px;
+            margin-bottom: 20px;
+        }
+
+        .curve-header {
+            margin-bottom: 12px;
+        }
+
+        .curve-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .curve-description {
+            font-size: 11px;
+            color: #888;
+            line-height: 1.5;
+            margin-bottom: 6px;
+        }
+
+        .curve-range {
+            font-size: 10px;
+            color: #666;
+            font-family: 'Consolas', 'Monaco', monospace;
+            background: #1a1a1a;
+            padding: 5px 8px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+
+        .curve-canvas-wrapper {
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+            border: 1px solid #1a1a1a;
+        }
+
+        .curve-canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            border-radius: 4px;
+            cursor: crosshair;
+        }
+
+        .node-controls {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 10px;
+        }
+
+        .node-controls-header {
+            font-size: 12px;
+            font-weight: 600;
+            color: #aaa;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .node-select {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .node-btn {
+            padding: 6px 12px;
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 6px;
+            color: #aaa;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 500;
+            transition: all 0.15s;
+            min-width: 55px;
+            text-align: center;
+        }
+
+        .node-btn:hover {
+            background: #3a3a3a;
+            border-color: #4a4a4a;
+        }
+
+        .node-btn.active {
+            background: #0066cc;
+            border-color: #0077ee;
+            color: white;
+        }
+
+        .node-inputs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .input-label {
+            font-size: 10px;
+            font-weight: 600;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .input-field {
+            padding: 8px 10px;
+            background: #0d0d0d;
+            border: 1px solid #3a3a3a;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: 'Consolas', 'Monaco', monospace;
+            transition: all 0.2s;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: #0066cc;
+            box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
+        }
+
+        .input-field:hover {
+            border-color: #4a4a4a;
+        }
+
+        .node-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .action-btn {
+            padding: 7px 10px;
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 6px;
+            color: #aaa;
+            cursor: pointer;
+            font-size: 10px;
+            font-weight: 600;
+            transition: all 0.15s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .action-btn:hover {
+            background: #3a3a3a;
+            color: #fff;
+        }
+
+        .action-btn.delete {
+            background: #aa0000;
+            border-color: #cc0000;
+            color: #fff;
+        }
+
+        .action-btn.delete:hover {
+            background: #cc0000;
+        }
+
+        .action-btn.add {
+            background: #00aa44;
+            border-color: #00cc55;
+            color: #fff;
+        }
+
+        .action-btn.add:hover {
+            background: #00cc55;
+        }
+
+        .vectorscope-container {
+            background: #000;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .vectorscope-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #aaa;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .vectorscope {
+            display: block;
+            margin: 0 auto;
+            border-radius: 8px;
+            background: #000;
+        }
+
+        .vectorscope-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .test-image-container {
+            position: relative;
+        }
+
+        .test-image {
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            background: #000;
+        }
+
+        .image-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #aaa;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .stat-box {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 6px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 9px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: #0066cc;
+            font-family: 'Consolas', monospace;
+        }
+
+        .preset-name-input {
+            width: 100%;
+            padding: 10px;
+            background: #0d0d0d;
+            border: 1px solid #3a3a3a;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 13px;
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+
+        .preset-name-input:focus {
+            outline: none;
+            border-color: #0066cc;
+        }
+
+        .help-text {
+            font-size: 10px;
+            color: #666;
+            line-height: 1.4;
+            margin-top: 6px;
+            padding: 6px;
+            background: #0d0d0d;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="scale-control">
+        <span class="scale-label">UI Scale:</span>
+        <input type="range" class="scale-slider" min="0.7" max="1.3" step="0.1" value="1.0" oninput="setUIScale(this.value)">
+        <span class="scale-label" id="scaleValue">100%</span>
+    </div>
+
+    <div class="container">
+        <h1>🎬 Film Emulation Preset Creator v4</h1>
+        <p class="subtitle">Professional DCTL Preset Generator for base7.dctl | Create parametric color transforms with precision</p>
+
+        <div class="main-grid">
+            <!-- Left Panel: Curve Editors -->
+            <div class="left-panel">
+                <!-- Controls Section -->
+                <div class="controls-section">
+                    <div class="section-header" style="margin-top: 0;">Film Presets</div>
+                    <div class="preset-buttons">
+                        <button class="preset-btn active" onclick="loadPreset('neutral')">Neutral</button>
+                        <button class="preset-btn" onclick="loadPreset('velvia')">Fuji Velvia</button>
+                        <button class="preset-btn" onclick="loadPreset('portra')">Kodak Portra</button>
+                        <button class="preset-btn" onclick="loadPreset('cinestill')">Cinestill 800T</button>
+                        <button class="preset-btn" onclick="loadPreset('teal_orange')">Teal & Orange</button>
+                        <button class="preset-btn" onclick="loadPreset('agfa')">Agfa Vista</button>
+                    </div>
+
+                    <div class="section-header">Export to DCTL</div>
+                    <input type="text" id="presetName" class="preset-name-input" placeholder="Preset Name (e.g., MY_CUSTOM)" value="CUSTOM">
+                    <div class="export-section">
+                        <button class="export-btn" onclick="exportDCTLPreset()">📋 Export DCTL Preset Code</button>
+                        <button class="export-btn secondary" onclick="exportJSON()">💾 Export JSON</button>
+                    </div>
+
+                    <div class="section-header">Statistics</div>
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div class="stat-label">Total Nodes</div>
+                            <div class="stat-value" id="totalNodes">0</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">Active Curve</div>
+                            <div class="stat-value" id="activeCurve">-</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">Active Node</div>
+                            <div class="stat-value" id="activeNode">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-header">Parametric Curve Editors</div>
+
+                <!-- Hue vs Hue -->
+                <div class="curve-section">
+                    <div class="curve-header">
+                        <div class="curve-title">Hue → Hue (Color Rotation)</div>
+                        <div class="curve-description">
+                            Rotates specific hues toward different colors. Essential for film character - e.g., shifting reds toward orange creates warmth.
+                        </div>
+                        <div class="curve-range">Input: 0-360° (hue circle) | Output: -30 to +30° (rotation amount)</div>
+                    </div>
+                    <div class="curve-canvas-wrapper">
+                        <canvas id="hueVsHueCanvas" class="curve-canvas" width="720" height="160"></canvas>
+                    </div>
+                    <div class="node-controls" id="hueVsHueControls">
+                        <div class="node-controls-header">Node Position Controls</div>
+                        <div class="node-select" id="hueVsHueNodeSelect"></div>
+                        <div class="node-inputs">
+                            <div class="input-group">
+                                <label class="input-label">X Position (Hue °)</label>
+                                <input type="number" class="input-field" id="hueVsHueX" step="1" min="0" max="360">
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label">Y Position (Shift °)</label>
+                                <input type="number" class="input-field" id="hueVsHueY" step="0.1" min="-30" max="30">
+                            </div>
+                        </div>
+                        <div class="node-actions">
+                            <button class="action-btn add" onclick="addNodeToCurve('hueVsHue')">+ Add Node</button>
+                            <button class="action-btn delete" onclick="deleteActiveNode('hueVsHue')">Delete Node</button>
+                        </div>
+                        <div class="help-text">Hues: Red=0°, Yellow=60°, Green=120°, Cyan=180°, Blue=240°, Magenta=300°</div>
+                    </div>
+                </div>
+
+                <!-- Hue vs Saturation -->
+                <div class="curve-section">
+                    <div class="curve-header">
+                        <div class="curve-title">Hue → Saturation (Hue-Dependent Saturation)</div>
+                        <div class="curve-description">
+                            Makes specific colors more or less saturated. Perfect for boosting blue skies or enhancing skin tones.
+                        </div>
+                        <div class="curve-range">Input: 0-360° (hue) | Output: 0-2x (multiplier) | 1.0 = no change</div>
+                    </div>
+                    <div class="curve-canvas-wrapper">
+                        <canvas id="hueVsSatCanvas" class="curve-canvas" width="720" height="160"></canvas>
+                    </div>
+                    <div class="node-controls" id="hueVsSatControls">
+                        <div class="node-controls-header">Node Position Controls</div>
+                        <div class="node-select" id="hueVsSatNodeSelect"></div>
+                        <div class="node-inputs">
+                            <div class="input-group">
+                                <label class="input-label">X Position (Hue °)</label>
+                                <input type="number" class="input-field" id="hueVsSatX" step="1" min="0" max="360">
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label">Y Position (Mult)</label>
+                                <input type="number" class="input-field" id="hueVsSatY" step="0.01" min="0" max="2">
+                            </div>
+                        </div>
+                        <div class="node-actions">
+                            <button class="action-btn add" onclick="addNodeToCurve('hueVsSat')">+ Add Node</button>
+                            <button class="action-btn delete" onclick="deleteActiveNode('hueVsSat')">Delete Node</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hue vs Luminance -->
+                <div class="curve-section">
+                    <div class="curve-header">
+                        <div class="curve-title">Hue → Luminance (Hue-Dependent Brightness)</div>
+                        <div class="curve-description">
+                            Brightens or darkens specific hues. Some films make yellows naturally brighter, or blues slightly darker.
+                        </div>
+                        <div class="curve-range">Input: 0-360° (hue) | Output: -0.2 to +0.2 (offset)</div>
+                    </div>
+                    <div class="curve-canvas-wrapper">
+                        <canvas id="hueVsLumCanvas" class="curve-canvas" width="720" height="160"></canvas>
+                    </div>
+                    <div class="node-controls" id="hueVsLumControls">
+                        <div class="node-controls-header">Node Position Controls</div>
+                        <div class="node-select" id="hueVsLumNodeSelect"></div>
+                        <div class="node-inputs">
+                            <div class="input-group">
+                                <label class="input-label">X Position (Hue °)</label>
+                                <input type="number" class="input-field" id="hueVsLumX" step="1" min="0" max="360">
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label">Y Position (Offset)</label>
+                                <input type="number" class="input-field" id="hueVsLumY" step="0.01" min="-0.2" max="0.2">
+                            </div>
+                        </div>
+                        <div class="node-actions">
+                            <button class="action-btn add" onclick="addNodeToCurve('hueVsLum')">+ Add Node</button>
+                            <button class="action-btn delete" onclick="deleteActiveNode('hueVsLum')">Delete Node</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Saturation vs Saturation -->
+                <div class="curve-section">
+                    <div class="curve-header">
+                        <div class="curve-title">Saturation → Saturation (Non-Linear Response)</div>
+                        <div class="curve-description">
+                            Controls how saturation responds. S-curves create "film rolloff" where highly saturated colors compress gently.
+                        </div>
+                        <div class="curve-range">Input: 0-1 (saturation) | Output: 0-1 (mapped saturation)</div>
+                    </div>
+                    <div class="curve-canvas-wrapper">
+                        <canvas id="satVsSatCanvas" class="curve-canvas" width="720" height="160"></canvas>
+                    </div>
+                    <div class="node-controls" id="satVsSatControls">
+                        <div class="node-controls-header">Node Position Controls</div>
+                        <div class="node-select" id="satVsSatNodeSelect"></div>
+                        <div class="node-inputs">
+                            <div class="input-group">
+                                <label class="input-label">X Position (In Sat)</label>
+                                <input type="number" class="input-field" id="satVsSatX" step="0.01" min="0" max="1">
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label">Y Position (Out Sat)</label>
+                                <input type="number" class="input-field" id="satVsSatY" step="0.01" min="0" max="1">
+                            </div>
+                        </div>
+                        <div class="node-actions">
+                            <button class="action-btn add" onclick="addNodeToCurve('satVsSat')">+ Add Node</button>
+                            <button class="action-btn delete" onclick="deleteActiveNode('satVsSat')">Delete Node</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Saturation vs Luminance -->
+                <div class="curve-section">
+                    <div class="curve-header">
+                        <div class="curve-title">Saturation → Luminance (Film Density Effect)</div>
+                        <div class="curve-description">
+                            Simulates how film dyes affect density. Highly saturated colors may block more light, appearing darker.
+                        </div>
+                        <div class="curve-range">Input: 0-1 (saturation) | Output: -0.2 to +0.2 (luminance offset)</div>
+                    </div>
+                    <div class="curve-canvas-wrapper">
+                        <canvas id="satVsLumCanvas" class="curve-canvas" width="720" height="160"></canvas>
+                    </div>
+                    <div class="node-controls" id="satVsLumControls">
+                        <div class="node-controls-header">Node Position Controls</div>
+                        <div class="node-select" id="satVsLumNodeSelect"></div>
+                        <div class="node-inputs">
+                            <div class="input-group">
+                                <label class="input-label">X Position (Saturation)</label>
+                                <input type="number" class="input-field" id="satVsLumX" step="0.01" min="0" max="1">
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label">Y Position (Offset)</label>
+                                <input type="number" class="input-field" id="satVsLumY" step="0.01" min="-0.2" max="0.2">
+                            </div>
+                        </div>
+                        <div class="node-actions">
+                            <button class="action-btn add" onclick="addNodeToCurve('satVsLum')">+ Add Node</button>
+                            <button class="action-btn delete" onclick="deleteActiveNode('satVsLum')">Delete Node</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Luminance vs Saturation -->
+                <div class="curve-section">
+                    <div class="curve-header">
+                        <div class="curve-title">Luminance → Saturation (Brightness-Dependent Saturation)</div>
+                        <div class="curve-description">
+                            Critical for film look! Desaturates shadows and highlights, keeping color in midtones. Creates depth.
+                        </div>
+                        <div class="curve-range">Input: 0-1 (luminance) | Output: 0-2x (saturation mult)</div>
+                    </div>
+                    <div class="curve-canvas-wrapper">
+                        <canvas id="lumVsSatCanvas" class="curve-canvas" width="720" height="160"></canvas>
+                    </div>
+                    <div class="node-controls" id="lumVsSatControls">
+                        <div class="node-controls-header">Node Position Controls</div>
+                        <div class="node-select" id="lumVsSatNodeSelect"></div>
+                        <div class="node-inputs">
+                            <div class="input-group">
+                                <label class="input-label">X Position (Luminance)</label>
+                                <input type="number" class="input-field" id="lumVsSatX" step="0.01" min="0" max="1">
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label">Y Position (Mult)</label>
+                                <input type="number" class="input-field" id="lumVsSatY" step="0.01" min="0" max="2">
+                            </div>
+                        </div>
+                        <div class="node-actions">
+                            <button class="action-btn add" onclick="addNodeToCurve('lumVsSat')">+ Add Node</button>
+                            <button class="action-btn delete" onclick="deleteActiveNode('lumVsSat')">Delete Node</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Luminance vs Luminance -->
+                <div class="curve-section">
+                    <div class="curve-header">
+                        <div class="curve-title">Luminance → Luminance (Tone Curve / Contrast)</div>
+                        <div class="curve-description">
+                            Traditional tone curve. S-curves add contrast, lifted blacks create "faded" look, rolled highlights soften.
+                        </div>
+                        <div class="curve-range">Input: 0-1 (luminance) | Output: 0-1 (mapped luminance)</div>
+                    </div>
+                    <div class="curve-canvas-wrapper">
+                        <canvas id="lumVsLumCanvas" class="curve-canvas" width="720" height="160"></canvas>
+                    </div>
+                    <div class="node-controls" id="lumVsLumControls">
+                        <div class="node-controls-header">Node Position Controls</div>
+                        <div class="node-select" id="lumVsLumNodeSelect"></div>
+                        <div class="node-inputs">
+                            <div class="input-group">
+                                <label class="input-label">X Position (In Lum)</label>
+                                <input type="number" class="input-field" id="lumVsLumX" step="0.01" min="0" max="1">
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label">Y Position (Out Lum)</label>
+                                <input type="number" class="input-field" id="lumVsLumY" step="0.01" min="0" max="1">
+                            </div>
+                        </div>
+                        <div class="node-actions">
+                            <button class="action-btn add" onclick="addNodeToCurve('lumVsLum')">+ Add Node</button>
+                            <button class="action-btn delete" onclick="deleteActiveNode('lumVsLum')">Delete Node</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Per-Channel Curves -->
+                <div class="section-header" style="margin-top: 30px;">Per-Channel Curves (Film Dye Layers)</div>
+                <p style="color: #666; font-size: 11px; margin-bottom: 15px; line-height: 1.5;">
+                    These simulate how film dyes respond. Each RGB channel can have independent contrast/tone.
+                </p>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                    <div class="curve-section">
+                        <div class="curve-title" style="color: #ff4444;">Red Channel</div>
+                        <div class="curve-range" style="margin-bottom: 8px;">0-1 → 0-1</div>
+                        <div class="curve-canvas-wrapper">
+                            <canvas id="redCurveCanvas" class="curve-canvas" width="240" height="160"></canvas>
+                        </div>
+                        <div class="node-controls" style="padding: 8px;">
+                            <div class="node-select" id="redCurveNodeSelect" style="gap: 4px;"></div>
+                        </div>
+                    </div>
+                    <div class="curve-section">
+                        <div class="curve-title" style="color: #44ff44;">Green Channel</div>
+                        <div class="curve-range" style="margin-bottom: 8px;">0-1 → 0-1</div>
+                        <div class="curve-canvas-wrapper">
+                            <canvas id="greenCurveCanvas" class="curve-canvas" width="240" height="160"></canvas>
+                        </div>
+                        <div class="node-controls" style="padding: 8px;">
+                            <div class="node-select" id="greenCurveNodeSelect" style="gap: 4px;"></div>
+                        </div>
+                    </div>
+                    <div class="curve-section">
+                        <div class="curve-title" style="color: #4444ff;">Blue Channel</div>
+                        <div class="curve-range" style="margin-bottom: 8px;">0-1 → 0-1</div>
+                        <div class="curve-canvas-wrapper">
+                            <canvas id="blueCurveCanvas" class="curve-canvas" width="240" height="160"></canvas>
+                        </div>
+                        <div class="node-controls" style="padding: 8px;">
+                            <div class="node-select" id="blueCurveNodeSelect" style="gap: 4px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Vectorscopes and Test Image -->
+            <div class="right-panel">
+                <div class="vectorscope-panel">
+                    <div class="section-header" style="margin-top: 0;">Vectorscopes & Analysis</div>
+
+                    <!-- Path to White -->
+                    <div class="vectorscope-container">
+                        <div class="vectorscope-title">Path to White (Achromatic Line)</div>
+                        <canvas id="pathToWhite" class="vectorscope" width="240" height="240"></canvas>
+                        <p style="color: #666; font-size: 10px; margin-top: 8px;">Shows how white point behaves through curves</p>
+                    </div>
+
+                    <!-- Hue Saturation Response -->
+                    <div class="vectorscope-grid">
+                        <div class="vectorscope-container">
+                            <div class="vectorscope-title">Hue → Saturation</div>
+                            <canvas id="vectorscope1" class="vectorscope" width="220" height="220"></canvas>
+                            <p style="color: #666; font-size: 10px; margin-top: 8px;">Saturation per hue</p>
+                        </div>
+                        <div class="vectorscope-container">
+                            <div class="vectorscope-title">With Hue Loops</div>
+                            <canvas id="vectorscope2" class="vectorscope" width="220" height="220"></canvas>
+                            <p style="color: #666; font-size: 10px; margin-top: 8px;">Hue rotation effect</p>
+                        </div>
+                    </div>
+
+                    <!-- Hue Luminance and Lum Saturation -->
+                    <div class="vectorscope-grid">
+                        <div class="vectorscope-container">
+                            <div class="vectorscope-title">Hue → Luminance</div>
+                            <canvas id="vectorscopeHueLum" class="vectorscope" width="220" height="220"></canvas>
+                            <p style="color: #666; font-size: 10px; margin-top: 8px;">Luminance shifts by hue</p>
+                        </div>
+                        <div class="vectorscope-container">
+                            <div class="vectorscope-title">Lum → Saturation</div>
+                            <canvas id="vectorscopeLumSat" class="vectorscope" width="220" height="220"></canvas>
+                            <p style="color: #666; font-size: 10px; margin-top: 8px;">Saturation by luminance</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="test-image-panel">
+                    <div class="section-header" style="margin-top: 0;">Test Image Preview</div>
+                    <div class="image-label">Original</div>
+                    <canvas id="testImageOriginal" class="test-image" width="480" height="360"></canvas>
+                    <div class="image-label" style="margin-top: 12px;">Processed (Live Preview)</div>
+                    <canvas id="testImageProcessed" class="test-image" width="480" height="360"></canvas>
+                    <p style="color: #666; font-size: 11px; margin-top: 10px; line-height: 1.4;">
+                        Updates in real-time as you edit curves. Shows color gradient test pattern.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // UI Scale control
+        function setUIScale(value) {
+            document.documentElement.style.setProperty('--ui-scale', value);
+            document.getElementById('scaleValue').textContent = Math.round(value * 100) + '%';
+        }
+
+        // Curve Editor Class with FIXED mouse coordinates
+        class CurveEditor {
+            constructor(canvasId, curveName, xRange, yRange, yLabel) {
+                this.canvas = document.getElementById(canvasId);
+                this.ctx = this.canvas.getContext('2d');
+                this.curveName = curveName;
+                this.xRange = xRange;
+                this.yRange = yRange;
+                this.yLabel = yLabel;
+                this.points = [];
+                this.selectedPoint = null;
+                this.activeNodeIndex = null;
+                this.isDragging = false;
+
+                this.init();
+            }
+
+            init() {
+                // Initialize with neutral curve
+                if (this.yLabel === 'Shift' || this.yLabel === 'Offset') {
+                    this.points = [[0, 0], [this.xRange[1], 0]];
+                } else if (this.yLabel === 'Mult') {
+                    this.points = [[0, 1], [this.xRange[1], 1]];
+                } else {
+                    this.points = [[0, 0], [this.xRange[1], this.xRange[1]]];
+                }
+
+                this.canvas.addEventListener('mousedown', this.onMouseDown.bind(this));
+                this.canvas.addEventListener('mousemove', this.onMouseMove.bind(this));
+                this.canvas.addEventListener('mouseup', this.onMouseUp.bind(this));
+                this.canvas.addEventListener('mouseleave', this.onMouseUp.bind(this));
+
+                this.draw();
+                this.updateNodeButtons();
+            }
+
+            canvasToValue(cx, cy) {
+                const x = (cx / this.canvas.width) * (this.xRange[1] - this.xRange[0]) + this.xRange[0];
+                const y = this.yRange[1] - (cy / this.canvas.height) * (this.yRange[1] - this.yRange[0]);
+                return [x, y];
+            }
+
+            valueToCanvas(x, y) {
+                const cx = ((x - this.xRange[0]) / (this.xRange[1] - this.xRange[0])) * this.canvas.width;
+                const cy = this.canvas.height - ((y - this.yRange[0]) / (this.yRange[1] - this.yRange[0])) * this.canvas.height;
+                return [cx, cy];
+            }
+
+            findNearestPoint(mx, my, threshold = 15) {
+                let nearest = null;
+                let minDist = threshold;
+
+                this.points.forEach((point, idx) => {
+                    const [cx, cy] = this.valueToCanvas(point[0], point[1]);
+                    const dist = Math.sqrt((mx - cx) ** 2 + (my - cy) ** 2);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        nearest = idx;
+                    }
+                });
+
+                return nearest;
+            }
+
+            onMouseDown(e) {
+                const rect = this.canvas.getBoundingClientRect();
+                const scaleX = this.canvas.width / rect.width;
+                const scaleY = this.canvas.height / rect.height;
+                const mx = (e.clientX - rect.left) * scaleX;
+                const my = (e.clientY - rect.top) * scaleY;
+
+                const nearest = this.findNearestPoint(mx, my);
+
+                if (nearest !== null) {
+                    this.selectedPoint = nearest;
+                    this.activeNodeIndex = nearest;
+                    this.isDragging = true;
+                    this.updateNodeButtons();
+                    this.updateInputFields();
+                } else {
+                    const [x, y] = this.canvasToValue(mx, my);
+                    this.addPoint(x, y);
+                }
+
+                updateStats();
+            }
+
+            onMouseMove(e) {
+                if (!this.isDragging || this.selectedPoint === null) return;
+
+                const rect = this.canvas.getBoundingClientRect();
+                const scaleX = this.canvas.width / rect.width;
+                const scaleY = this.canvas.height / rect.height;
+                const mx = (e.clientX - rect.left) * scaleX;
+                const my = (e.clientY - rect.top) * scaleY;
+
+                const [x, y] = this.canvasToValue(mx, my);
+
+                const clampedX = Math.max(this.xRange[0], Math.min(this.xRange[1], x));
+                const clampedY = Math.max(this.yRange[0], Math.min(this.yRange[1], y));
+
+                if (this.selectedPoint === 0 || this.selectedPoint === this.points.length - 1) {
+                    this.points[this.selectedPoint][1] = clampedY;
+                } else {
+                    this.points[this.selectedPoint] = [clampedX, clampedY];
+                }
+
+                this.sortPoints();
+                this.draw();
+                this.updateInputFields();
+                updateVectorscopes();
+                updateTestImage();
+            }
+
+            onMouseUp(e) {
+                this.isDragging = false;
+            }
+
+            addPoint(x, y) {
+                const clampedX = Math.max(this.xRange[0], Math.min(this.xRange[1], x));
+                const clampedY = Math.max(this.yRange[0], Math.min(this.yRange[1], y));
+                this.points.push([clampedX, clampedY]);
+                this.sortPoints();
+                this.activeNodeIndex = this.points.findIndex(p => p[0] === clampedX && p[1] === clampedY);
+                this.draw();
+                this.updateNodeButtons();
+                this.updateInputFields();
+                updateStats();
+                updateVectorscopes();
+                updateTestImage();
+            }
+
+            deletePoint(index) {
+                if (this.points.length <= 2) {
+                    alert('Cannot delete: must have at least 2 points');
+                    return;
+                }
+                if (index === 0 || index === this.points.length - 1) {
+                    alert('Cannot delete first or last point');
+                    return;
+                }
+                this.points.splice(index, 1);
+                this.activeNodeIndex = null;
+                this.draw();
+                this.updateNodeButtons();
+                this.updateInputFields();
+                updateStats();
+                updateVectorscopes();
+                updateTestImage();
+            }
+
+            sortPoints() {
+                this.points.sort((a, b) => a[0] - b[0]);
+            }
+
+            setActiveNode(index) {
+                this.activeNodeIndex = index;
+                this.updateNodeButtons();
+                this.updateInputFields();
+            }
+
+            updateNodeButtons() {
+                const container = document.getElementById(this.curveName + 'NodeSelect');
+                if (!container) return;
+
+                container.innerHTML = '';
+                this.points.forEach((point, idx) => {
+                    const btn = document.createElement('button');
+                    btn.className = 'node-btn' + (idx === this.activeNodeIndex ? ' active' : '');
+                    btn.textContent = `N${idx + 1}`;
+                    btn.onclick = () => this.setActiveNode(idx);
+                    container.appendChild(btn);
+                });
+            }
+
+            updateInputFields() {
+                const xInput = document.getElementById(this.curveName + 'X');
+                const yInput = document.getElementById(this.curveName + 'Y');
+
+                if (!xInput || !yInput) return;
+
+                if (this.activeNodeIndex !== null) {
+                    const point = this.points[this.activeNodeIndex];
+                    xInput.value = point[0].toFixed(2);
+                    yInput.value = point[1].toFixed(2);
+
+                    xInput.onchange = () => {
+                        const newX = parseFloat(xInput.value);
+                        if (this.activeNodeIndex !== 0 && this.activeNodeIndex !== this.points.length - 1) {
+                            this.points[this.activeNodeIndex][0] = Math.max(this.xRange[0], Math.min(this.xRange[1], newX));
+                            this.sortPoints();
+                        }
+                        this.draw();
+                        updateVectorscopes();
+                        updateTestImage();
+                    };
+
+                    yInput.onchange = () => {
+                        const newY = parseFloat(yInput.value);
+                        this.points[this.activeNodeIndex][1] = Math.max(this.yRange[0], Math.min(this.yRange[1], newY));
+                        this.draw();
+                        updateVectorscopes();
+                        updateTestImage();
+                    };
+                } else {
+                    xInput.value = '';
+                    yInput.value = '';
+                }
+            }
+
+            draw() {
+                const ctx = this.ctx;
+                const w = this.canvas.width;
+                const h = this.canvas.height;
+
+                ctx.fillStyle = '#000';
+                ctx.fillRect(0, 0, w, h);
+
+                // Grid
+                ctx.strokeStyle = '#1a1a1a';
+                ctx.lineWidth = 1;
+                for (let i = 0; i <= 10; i++) {
+                    const x = (i / 10) * w;
+                    const y = (i / 10) * h;
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, h);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(w, y);
+                    ctx.stroke();
+                }
+
+                // Center/unity line
+                if (this.yLabel === 'Shift' || this.yLabel === 'Offset') {
+                    const zeroY = this.valueToCanvas(0, 0)[1];
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(0, zeroY);
+                    ctx.lineTo(w, zeroY);
+                    ctx.stroke();
+                }
+
+                if (this.yLabel === 'Mult' || this.yLabel === 'Out') {
+                    ctx.strokeStyle = '#222';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 5]);
+                    ctx.beginPath();
+                    for (let i = 0; i <= 100; i++) {
+                        const x = (i / 100) * (this.xRange[1] - this.xRange[0]) + this.xRange[0];
+                        const y = (this.yLabel === 'Mult') ? 1 : x;
+                        const [cx, cy] = this.valueToCanvas(x, y);
+                        if (i === 0) ctx.moveTo(cx, cy);
+                        else ctx.lineTo(cx, cy);
+                    }
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+
+                // Curve
+                ctx.strokeStyle = '#0088ff';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                for (let i = 0; i <= 200; i++) {
+                    const x = (i / 200) * (this.xRange[1] - this.xRange[0]) + this.xRange[0];
+                    const y = this.interpolate(x);
+                    const [cx, cy] = this.valueToCanvas(x, y);
+                    if (i === 0) ctx.moveTo(cx, cy);
+                    else ctx.lineTo(cx, cy);
+                }
+                ctx.stroke();
+
+                // Points
+                this.points.forEach((point, idx) => {
+                    const [cx, cy] = this.valueToCanvas(point[0], point[1]);
+                    ctx.fillStyle = idx === this.activeNodeIndex ? '#ff4444' : '#fff';
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, idx === this.activeNodeIndex ? 8 : 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#000';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                });
+            }
+
+            interpolate(x) {
+                if (x <= this.points[0][0]) return this.points[0][1];
+                if (x >= this.points[this.points.length - 1][0]) return this.points[this.points.length - 1][1];
+
+                for (let i = 0; i < this.points.length - 1; i++) {
+                    const x1 = this.points[i][0];
+                    const x2 = this.points[i + 1][0];
+
+                    if (x >= x1 && x <= x2) {
+                        const y1 = this.points[i][1];
+                        const y2 = this.points[i + 1][1];
+
+                        const x0 = i > 0 ? this.points[i - 1][0] : x1;
+                        const y0 = i > 0 ? this.points[i - 1][1] : y1;
+                        const x3 = i < this.points.length - 2 ? this.points[i + 2][0] : x2;
+                        const y3 = i < this.points.length - 2 ? this.points[i + 2][1] : y2;
+
+                        const m1 = i > 0 ? (y2 - y0) / (x2 - x0) : (y2 - y1) / (x2 - x1);
+                        const m2 = i < this.points.length - 2 ? (y3 - y1) / (x3 - x1) : (y2 - y1) / (x2 - x1);
+
+                        const t = (x - x1) / (x2 - x1);
+                        const t2 = t * t;
+                        const t3 = t2 * t;
+
+                        const h00 = 2*t3 - 3*t2 + 1;
+                        const h10 = t3 - 2*t2 + t;
+                        const h01 = -2*t3 + 3*t2;
+                        const h11 = t3 - t2;
+
+                        return h00*y1 + h10*(x2-x1)*m1 + h01*y2 + h11*(x2-x1)*m2;
+                    }
+                }
+
+                return this.points[this.points.length - 1][1];
+            }
+
+            getData() {
+                return this.points;
+            }
+
+            setData(points) {
+                this.points = points;
+                this.sortPoints();
+                this.draw();
+                this.updateNodeButtons();
+            }
+        }
+
+        // Initialize all curve editors
+        const curves = {
+            hueVsHue: new CurveEditor('hueVsHueCanvas', 'hueVsHue', [0, 360], [-30, 30], 'Shift'),
+            hueVsSat: new CurveEditor('hueVsSatCanvas', 'hueVsSat', [0, 360], [0, 2], 'Mult'),
+            hueVsLum: new CurveEditor('hueVsLumCanvas', 'hueVsLum', [0, 360], [-0.2, 0.2], 'Offset'),
+            satVsSat: new CurveEditor('satVsSatCanvas', 'satVsSat', [0, 1], [0, 1], 'Out'),
+            satVsLum: new CurveEditor('satVsLumCanvas', 'satVsLum', [0, 1], [-0.2, 0.2], 'Offset'),
+            lumVsSat: new CurveEditor('lumVsSatCanvas', 'lumVsSat', [0, 1], [0, 2], 'Mult'),
+            lumVsLum: new CurveEditor('lumVsLumCanvas', 'lumVsLum', [0, 1], [0, 1], 'Out'),
+            redCurve: new CurveEditor('redCurveCanvas', 'redCurve', [0, 1], [0, 1], 'Out'),
+            greenCurve: new CurveEditor('greenCurveCanvas', 'greenCurve', [0, 1], [0, 1], 'Out'),
+            blueCurve: new CurveEditor('blueCurveCanvas', 'blueCurve', [0, 1], [0, 1], 'Out')
+        };
+
+        // HSV conversion functions
+        function rgbToHsv(r, g, b) {
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const delta = max - min;
+
+            let h = 0;
+            if (delta > 0) {
+                if (max === r) h = 60 * (((g - b) / delta) % 6);
+                else if (max === g) h = 60 * (((b - r) / delta) + 2);
+                else h = 60 * (((r - g) / delta) + 4);
+            }
+            if (h < 0) h += 360;
+
+            const s = max === 0 ? 0 : delta / max;
+            const v = max;
+
+            return [h, s, v];
+        }
+
+        function hsvToRgb(h, s, v) {
+            const c = v * s;
+            const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+            const m = v - c;
+
+            let r, g, b;
+            if (h >= 0 && h < 60) { r = c; g = x; b = 0; }
+            else if (h >= 60 && h < 120) { r = x; g = c; b = 0; }
+            else if (h >= 120 && h < 180) { r = 0; g = c; b = x; }
+            else if (h >= 180 && h < 240) { r = 0; g = x; b = c; }
+            else if (h >= 240 && h < 300) { r = x; g = 0; b = c; }
+            else { r = c; g = 0; b = x; }
+
+            return [r + m, g + m, b + m];
+        }
+
+        // Apply curves to a color
+        function processColor(r, g, b) {
+            let [h, s, v] = rgbToHsv(r, g, b);
+
+            // Apply curves
+            h = h + curves.hueVsHue.interpolate(h);
+            h = (h + 360) % 360;
+
+            s = s * curves.hueVsSat.interpolate(h);
+            s = Math.max(0, Math.min(1, s));
+
+            v = v + curves.hueVsLum.interpolate(h);
+            v = Math.max(0, Math.min(1, v));
+
+            s = curves.satVsSat.interpolate(s);
+            v = v + curves.satVsLum.interpolate(s);
+
+            s = s * curves.lumVsSat.interpolate(v);
+            v = curves.lumVsLum.interpolate(v);
+
+            s = Math.max(0, Math.min(1, s));
+            v = Math.max(0, Math.min(1, v));
+
+            [r, g, b] = hsvToRgb(h, s, v);
+
+            r = curves.redCurve.interpolate(r);
+            g = curves.greenCurve.interpolate(g);
+            b = curves.blueCurve.interpolate(b);
+
+            return [
+                Math.max(0, Math.min(255, r * 255)),
+                Math.max(0, Math.min(255, g * 255)),
+                Math.max(0, Math.min(255, b * 255))
+            ];
+        }
+
+        // Update vectorscopes
+        function updateVectorscopes() {
+            updatePathToWhite();
+            updateHueSatVectorscope();
+            updateHueLoopsVectorscope();
+            updateHueLumVectorscope();
+            updateLumSatVectorscope();
+        }
+
+        // Path to White visualization
+        function updatePathToWhite() {
+            const canvas = document.getElementById('pathToWhite');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const cx = w / 2;
+            const cy = h / 2;
+            const radius = Math.min(w, h) / 2 - 20;
+
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, w, h);
+
+            // Draw reference circles
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 1;
+            for (let r = 0.2; r <= 1.0; r += 0.2) {
+                ctx.beginPath();
+                ctx.arc(cx, cy, radius * r, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            // Draw hue lines
+            for (let angle = 0; angle < 360; angle += 60) {
+                const rad = (angle - 90) * Math.PI / 180;
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(cx + radius * Math.cos(rad), cy + radius * Math.sin(rad));
+                ctx.stroke();
+            }
+
+            // Draw path to white (achromatic line from black to white)
+            // Start from various saturated colors at different hues
+            for (let hue = 0; hue < 360; hue += 15) {
+                ctx.beginPath();
+                ctx.strokeStyle = `hsla(${hue}, 100%, 50%, 0.3)`;
+                ctx.lineWidth = 1;
+
+                for (let v = 0; v <= 1.0; v += 0.02) {
+                    let s = 0.8 * (1 - v); // Start saturated, desaturate toward white
+                    let h = hue;
+
+                    // Process through curves
+                    h = h + curves.hueVsHue.interpolate(h);
+                    h = (h + 360) % 360;
+                    s = s * curves.hueVsSat.interpolate(h);
+                    s = Math.max(0, Math.min(1, s));
+
+                    let val = v + curves.hueVsLum.interpolate(h);
+                    val = Math.max(0, Math.min(1, val));
+
+                    s = curves.satVsSat.interpolate(s);
+                    s = s * curves.lumVsSat.interpolate(val);
+                    val = curves.lumVsLum.interpolate(val);
+
+                    s = Math.max(0, Math.min(1, s));
+
+                    const rad = (h - 90) * Math.PI / 180;
+                    const r = radius * s * val;
+                    const x = cx + r * Math.cos(rad);
+                    const y = cy + r * Math.sin(rad);
+
+                    if (v === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            }
+
+            // Labels
+            const labels = [
+                { angle: 0, text: 'R', color: '#ff4444' },
+                { angle: 60, text: 'Y', color: '#ffff44' },
+                { angle: 120, text: 'G', color: '#44ff44' },
+                { angle: 180, text: 'C', color: '#44ffff' },
+                { angle: 240, text: 'B', color: '#4444ff' },
+                { angle: 300, text: 'M', color: '#ff44ff' }
+            ];
+
+            ctx.font = '12px monospace';
+            labels.forEach(({ angle, text, color }) => {
+                const rad = (angle - 90) * Math.PI / 180;
+                const x = cx + (radius + 12) * Math.cos(rad);
+                const y = cy + (radius + 12) * Math.sin(rad);
+                ctx.fillStyle = color;
+                ctx.fillText(text, x - 4, y + 4);
+            });
+        }
+
+        // Hue Saturation Vectorscope
+        function updateHueSatVectorscope() {
+            const canvas = document.getElementById('vectorscope1');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const cx = w / 2;
+            const cy = h / 2;
+            const radius = Math.min(w, h) / 2 - 20;
+
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, w, h);
+
+            // Draw reference
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 1;
+            for (let r = 0.2; r <= 1.0; r += 0.2) {
+                ctx.beginPath();
+                ctx.arc(cx, cy, radius * r, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            for (let angle = 0; angle < 360; angle += 60) {
+                const rad = (angle - 90) * Math.PI / 180;
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(cx + radius * Math.cos(rad), cy + radius * Math.sin(rad));
+                ctx.stroke();
+            }
+
+            // Plot hue saturation response
+            for (let angle = 0; angle < 360; angle++) {
+                const sat = curves.hueVsSat.interpolate(angle);
+                const rad = (angle - 90) * Math.PI / 180;
+                const r = radius * Math.min(sat, 1.0);
+                const x = cx + r * Math.cos(rad);
+                const y = cy + r * Math.sin(rad);
+
+                ctx.fillStyle = `hsl(${angle}, 100%, 50%)`;
+                ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+            }
+
+            // Labels
+            const labels = [
+                { angle: 0, text: 'R', color: '#ff4444' },
+                { angle: 60, text: 'Y', color: '#ffff44' },
+                { angle: 120, text: 'G', color: '#44ff44' },
+                { angle: 180, text: 'C', color: '#44ffff' },
+                { angle: 240, text: 'B', color: '#4444ff' },
+                { angle: 300, text: 'M', color: '#ff44ff' }
+            ];
+
+            ctx.font = '11px monospace';
+            labels.forEach(({ angle, text, color }) => {
+                const rad = (angle - 90) * Math.PI / 180;
+                const x = cx + (radius + 12) * Math.cos(rad);
+                const y = cy + (radius + 12) * Math.sin(rad);
+                ctx.fillStyle = color;
+                ctx.fillText(text, x - 4, y + 4);
+            });
+        }
+
+        // Hue Loops Vectorscope
+        function updateHueLoopsVectorscope() {
+            const canvas = document.getElementById('vectorscope2');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const cx = w / 2;
+            const cy = h / 2;
+            const radius = Math.min(w, h) / 2 - 20;
+
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, w, h);
+
+            // Draw reference
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 1;
+            for (let r = 0.2; r <= 1.0; r += 0.2) {
+                ctx.beginPath();
+                ctx.arc(cx, cy, radius * r, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            for (let angle = 0; angle < 360; angle += 60) {
+                const rad = (angle - 90) * Math.PI / 180;
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(cx + radius * Math.cos(rad), cy + radius * Math.sin(rad));
+                ctx.stroke();
+            }
+
+            // Plot WITH hue rotation showing loops
+            for (let baseAngle = 0; baseAngle < 360; baseAngle += 60) {
+                for (let satLevel = 0; satLevel <= 1.0; satLevel += 0.1) {
+                    let h = baseAngle;
+                    let s = satLevel;
+
+                    // Apply hue shift
+                    h = h + curves.hueVsHue.interpolate(h);
+                    h = (h + 360) % 360;
+
+                    // Apply saturation
+                    s = s * curves.hueVsSat.interpolate(baseAngle);
+
+                    const rad = (h - 90) * Math.PI / 180;
+                    const r = radius * Math.min(s, 1.0);
+                    const x = cx + r * Math.cos(rad);
+                    const y = cy + r * Math.sin(rad);
+
+                    ctx.fillStyle = `hsl(${baseAngle}, ${satLevel * 100}%, 50%)`;
+                    ctx.fillRect(x - 2, y - 2, 4, 4);
+                }
+            }
+
+            // Labels
+            ctx.font = '11px monospace';
+            const labels = [
+                { angle: 0, text: 'R', color: '#ff4444' },
+                { angle: 60, text: 'Y', color: '#ffff44' },
+                { angle: 120, text: 'G', color: '#44ff44' },
+                { angle: 180, text: 'C', color: '#44ffff' },
+                { angle: 240, text: 'B', color: '#4444ff' },
+                { angle: 300, text: 'M', color: '#ff44ff' }
+            ];
+            labels.forEach(({ angle, text, color }) => {
+                const rad = (angle - 90) * Math.PI / 180;
+                const x = cx + (radius + 12) * Math.cos(rad);
+                const y = cy + (radius + 12) * Math.sin(rad);
+                ctx.fillStyle = color;
+                ctx.fillText(text, x - 4, y + 4);
+            });
+        }
+
+        // Hue Luminance Vectorscope
+        function updateHueLumVectorscope() {
+            const canvas = document.getElementById('vectorscopeHueLum');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const cx = w / 2;
+            const cy = h / 2;
+            const radius = Math.min(w, h) / 2 - 20;
+
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, w, h);
+
+            // Draw reference
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 1;
+            for (let r = 0.2; r <= 1.0; r += 0.2) {
+                ctx.beginPath();
+                ctx.arc(cx, cy, radius * r, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            for (let angle = 0; angle < 360; angle += 60) {
+                const rad = (angle - 90) * Math.PI / 180;
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(cx + radius * Math.cos(rad), cy + radius * Math.sin(rad));
+                ctx.stroke();
+            }
+
+            // Plot hue luminance response (luminance offset mapped to radius)
+            for (let angle = 0; angle < 360; angle++) {
+                const lumOffset = curves.hueVsLum.interpolate(angle);
+                // Map -0.2 to +0.2 range to 0-1 radius
+                const normalizedLum = (lumOffset + 0.2) / 0.4;
+                const rad = (angle - 90) * Math.PI / 180;
+                const r = radius * normalizedLum;
+                const x = cx + r * Math.cos(rad);
+                const y = cy + r * Math.sin(rad);
+
+                ctx.fillStyle = `hsl(${angle}, 100%, 50%)`;
+                ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+            }
+
+            // Center reference (zero luminance change)
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius * 0.5, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Labels
+            ctx.font = '11px monospace';
+            const labels = [
+                { angle: 0, text: 'R', color: '#ff4444' },
+                { angle: 60, text: 'Y', color: '#ffff44' },
+                { angle: 120, text: 'G', color: '#44ff44' },
+                { angle: 180, text: 'C', color: '#44ffff' },
+                { angle: 240, text: 'B', color: '#4444ff' },
+                { angle: 300, text: 'M', color: '#ff44ff' }
+            ];
+            labels.forEach(({ angle, text, color }) => {
+                const rad = (angle - 90) * Math.PI / 180;
+                const x = cx + (radius + 12) * Math.cos(rad);
+                const y = cy + (radius + 12) * Math.sin(rad);
+                ctx.fillStyle = color;
+                ctx.fillText(text, x - 4, y + 4);
+            });
+        }
+
+        // Luminance Saturation Curve Visualization
+        function updateLumSatVectorscope() {
+            const canvas = document.getElementById('vectorscopeLumSat');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, w, h);
+
+            // Draw grid
+            ctx.strokeStyle = '#1a1a1a';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 10; i++) {
+                const x = (i / 10) * w;
+                const y = (i / 10) * h;
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, h);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(w, y);
+                ctx.stroke();
+            }
+
+            // Draw unity line (1.0 saturation multiplier)
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(0, h / 2);
+            ctx.lineTo(w, h / 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw the luminance vs saturation curve
+            ctx.strokeStyle = '#0088ff';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            for (let i = 0; i <= 100; i++) {
+                const lum = i / 100;
+                const satMult = curves.lumVsSat.interpolate(lum);
+                const x = lum * w;
+                // Map saturation multiplier (0-2) to canvas height (inverted)
+                const y = h - ((satMult / 2) * h);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Draw gradient to show luminance
+            const gradient = ctx.createLinearGradient(0, 0, w, 0);
+            gradient.addColorStop(0, '#000');
+            gradient.addColorStop(0.5, '#888');
+            gradient.addColorStop(1, '#fff');
+            ctx.fillStyle = gradient;
+            ctx.globalAlpha = 0.1;
+            ctx.fillRect(0, 0, w, h);
+            ctx.globalAlpha = 1;
+
+            // Labels
+            ctx.fillStyle = '#888';
+            ctx.font = '10px monospace';
+            ctx.fillText('Lum 0', 5, h - 5);
+            ctx.fillText('Lum 1', w - 35, h - 5);
+            ctx.fillText('Sat 2x', 5, 12);
+            ctx.fillText('Sat 1x', 5, h / 2 + 12);
+            ctx.fillText('Sat 0', 5, h - 15);
+        }
+
+        // Generate and update test image
+        function updateTestImage() {
+            const canvasOrig = document.getElementById('testImageOriginal');
+            const canvasProc = document.getElementById('testImageProcessed');
+            const ctxOrig = canvasOrig.getContext('2d');
+            const ctxProc = canvasProc.getContext('2d');
+            const w = canvasOrig.width;
+            const h = canvasOrig.height;
+
+            const imgDataOrig = ctxOrig.createImageData(w, h);
+            const imgDataProc = ctxProc.createImageData(w, h);
+
+            // Generate hue/saturation gradient test pattern
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const hue = (x / w) * 360;
+                    const sat = 1.0 - (y / h);
+                    const val = 0.7;
+
+                    const [r, g, b] = hsvToRgb(hue, sat, val);
+
+                    const idx = (y * w + x) * 4;
+                    imgDataOrig.data[idx] = r * 255;
+                    imgDataOrig.data[idx + 1] = g * 255;
+                    imgDataOrig.data[idx + 2] = b * 255;
+                    imgDataOrig.data[idx + 3] = 255;
+
+                    const [rProc, gProc, bProc] = processColor(r, g, b);
+                    imgDataProc.data[idx] = rProc;
+                    imgDataProc.data[idx + 1] = gProc;
+                    imgDataProc.data[idx + 2] = bProc;
+                    imgDataProc.data[idx + 3] = 255;
+                }
+            }
+
+            ctxOrig.putImageData(imgDataOrig, 0, 0);
+            ctxProc.putImageData(imgDataProc, 0, 0);
+        }
+
+        // Preset loading
+        function loadPreset(name) {
+            const presets = {
+                neutral: {
+                    hueVsHue: [[0, 0], [360, 0]],
+                    hueVsSat: [[0, 1], [360, 1]],
+                    hueVsLum: [[0, 0], [360, 0]],
+                    satVsSat: [[0, 0], [1, 1]],
+                    satVsLum: [[0, 0], [1, 0]],
+                    lumVsSat: [[0, 1], [1, 1]],
+                    lumVsLum: [[0, 0], [1, 1]],
+                    redCurve: [[0, 0], [1, 1]],
+                    greenCurve: [[0, 0], [1, 1]],
+                    blueCurve: [[0, 0], [1, 1]]
+                },
+                velvia: {
+                    hueVsHue: [[0, 5], [60, 10], [120, -5], [180, 0], [240, 5], [300, 0], [360, 5]],
+                    hueVsSat: [[0, 1.2], [60, 1.4], [120, 1.5], [180, 1.3], [240, 1.4], [300, 1.1], [360, 1.2]],
+                    hueVsLum: [[0, 0], [60, 0.05], [120, 0], [180, -0.02], [240, -0.03], [300, 0], [360, 0]],
+                    satVsSat: [[0, 0], [0.3, 0.39], [0.6, 0.84], [0.9, 1.08], [1, 1]],
+                    satVsLum: [[0, 0], [0.5, 0], [1, 0]],
+                    lumVsSat: [[0, 0.7], [0.2, 1], [0.5, 1.2], [0.8, 1.1], [1, 0.9]],
+                    lumVsLum: [[0, 0], [0.1, 0.15], [0.3, 0.35], [0.5, 0.5], [0.7, 0.68], [0.9, 0.88], [1, 1]],
+                    redCurve: [[0, 0], [0.5, 0.5], [1, 1]],
+                    greenCurve: [[0, 0], [0.5, 0.5], [1, 1]],
+                    blueCurve: [[0, 0], [0.5, 0.5], [1, 1]]
+                },
+                portra: {
+                    hueVsHue: [[0, -3], [30, 5], [60, 5], [120, 0], [180, -5], [240, -5], [300, 0], [360, -3]],
+                    hueVsSat: [[0, 0.9], [30, 1.0], [60, 0.95], [120, 0.85], [180, 0.9], [240, 0.85], [300, 0.9], [360, 0.9]],
+                    hueVsLum: [[0, 0], [30, 0.03], [60, 0.02], [120, 0], [180, 0], [240, 0], [300, 0], [360, 0]],
+                    satVsSat: [[0, 0], [0.3, 0.285], [0.6, 0.54], [0.9, 0.765], [1, 0.8]],
+                    satVsLum: [[0, 0], [0.5, 0], [1, 0]],
+                    lumVsSat: [[0, 0.6], [0.2, 0.85], [0.5, 1], [0.8, 0.95], [1, 0.8]],
+                    lumVsLum: [[0, 0.02], [0.1, 0.12], [0.3, 0.32], [0.5, 0.5], [0.7, 0.7], [0.9, 0.92], [1, 0.98]],
+                    redCurve: [[0, 0], [0.5, 0.5], [1, 1]],
+                    greenCurve: [[0, 0], [0.5, 0.5], [1, 1]],
+                    blueCurve: [[0, 0], [0.5, 0.5], [1, 1]]
+                },
+                cinestill: {
+                    hueVsHue: [[0, 10], [60, 10], [120, -5], [180, -10], [240, -8], [300, 5], [360, 10]],
+                    hueVsSat: [[0, 1.2], [60, 1.1], [120, 0.95], [180, 1.1], [240, 1.3], [300, 1.15], [360, 1.2]],
+                    hueVsLum: [[0, 0.05], [60, 0.03], [120, 0], [180, -0.05], [240, -0.03], [300, 0], [360, 0.05]],
+                    satVsSat: [[0, 0], [0.25, 0.275], [0.5, 0.6], [0.75, 0.8625], [1, 1]],
+                    satVsLum: [[0, 0], [0.5, 0], [1, 0]],
+                    lumVsSat: [[0, 0.8], [0.2, 1], [0.5, 1.1], [0.8, 1.2], [1, 1.3]],
+                    lumVsLum: [[0, 0], [0.15, 0.18], [0.35, 0.4], [0.5, 0.52], [0.7, 0.73], [0.85, 0.9], [1, 1]],
+                    redCurve: [[0, 0], [0.5, 0.5], [1, 1]],
+                    greenCurve: [[0, 0], [0.5, 0.5], [1, 1]],
+                    blueCurve: [[0, 0], [0.5, 0.5], [1, 1]]
+                },
+                teal_orange: {
+                    hueVsHue: [[0, 15], [60, 10], [120, 0], [180, -15], [240, -10], [300, 5], [360, 15]],
+                    hueVsSat: [[0, 1.3], [60, 1.2], [120, 0.9], [180, 1.4], [240, 1.2], [300, 1.0], [360, 1.3]],
+                    hueVsLum: [[0, 0], [360, 0]],
+                    satVsSat: [[0, 0], [1, 1]],
+                    satVsLum: [[0, 0], [1, 0]],
+                    lumVsSat: [[0, 0.7], [0.3, 1.1], [0.6, 1.2], [1, 0.7]],
+                    lumVsLum: [[0, 0.05], [0.2, 0.22], [0.5, 0.5], [0.8, 0.82], [1, 0.95]],
+                    redCurve: [[0, 0], [1, 1]],
+                    greenCurve: [[0, 0], [1, 1]],
+                    blueCurve: [[0, 0], [1, 1]]
+                },
+                agfa: {
+                    hueVsHue: [[0, 8], [60, 12], [120, 5], [180, -5], [240, -3], [300, 5], [360, 8]],
+                    hueVsSat: [[0, 1.1], [60, 1.25], [120, 1.2], [180, 1.0], [240, 0.95], [300, 1.05], [360, 1.1]],
+                    hueVsLum: [[0, 0], [360, 0]],
+                    satVsSat: [[0, 0], [0.4, 0.46], [0.7, 0.77], [1, 0.95]],
+                    satVsLum: [[0, 0], [1, 0]],
+                    lumVsSat: [[0, 0.75], [0.3, 1.05], [0.6, 1.1], [1, 0.9]],
+                    lumVsLum: [[0, 0], [1, 1]],
+                    redCurve: [[0, 0], [1, 1]],
+                    greenCurve: [[0, 0], [1, 1]],
+                    blueCurve: [[0, 0], [1, 1]]
+                }
+            };
+
+            if (presets[name]) {
+                Object.keys(presets[name]).forEach(curveName => {
+                    if (curves[curveName]) {
+                        curves[curveName].setData(presets[name][curveName]);
+                    }
+                });
+
+                document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+                event.target.classList.add('active');
+
+                updateVectorscopes();
+                updateTestImage();
+                updateStats();
+            }
+        }
+
+        // Add node to curve
+        function addNodeToCurve(curveName) {
+            if (curves[curveName]) {
+                const xRange = curves[curveName].xRange;
+                const yRange = curves[curveName].yRange;
+                const midX = (xRange[0] + xRange[1]) / 2;
+                const midY = (yRange[0] + yRange[1]) / 2;
+                curves[curveName].addPoint(midX, midY);
+            }
+        }
+
+        // Delete active node
+        function deleteActiveNode(curveName) {
+            if (curves[curveName] && curves[curveName].activeNodeIndex !== null) {
+                curves[curveName].deletePoint(curves[curveName].activeNodeIndex);
+            }
+        }
+
+        // Update statistics
+        function updateStats() {
+            let totalNodes = 0;
+            Object.values(curves).forEach(curve => {
+                totalNodes += curve.points.length;
+            });
+            document.getElementById('totalNodes').textContent = totalNodes;
+
+            let activeCurveName = '-';
+            let activeNodeNum = '-';
+            Object.entries(curves).forEach(([name, curve]) => {
+                if (curve.activeNodeIndex !== null) {
+                    activeCurveName = name;
+                    activeNodeNum = (curve.activeNodeIndex + 1).toString();
+                }
+            });
+            document.getElementById('activeCurve').textContent = activeCurveName;
+            document.getElementById('activeNode').textContent = activeNodeNum;
+        }
+
+        // Export DCTL preset code
+        function exportDCTLPreset() {
+            const presetName = document.getElementById('presetName').value.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+            let code = `// ============================================================================\n`;
+            code += `// DCTL PRESET: ${presetName}\n`;
+            code += `// Generated by Film Emulation Preset Creator v4\n`;
+            code += `// ============================================================================\n\n`;
+
+            Object.entries(curves).forEach(([name, curve]) => {
+                const points = curve.getData();
+                const arrayName = name.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+                const constantName = `${arrayName}_${presetName}`;
+
+                code += `__CONSTANT__ float ${constantName}[][2] = {\n`;
+                points.forEach((point, idx) => {
+                    const isLast = idx === points.length - 1;
+                    code += `    {${point[0].toFixed(4)}f, ${point[1].toFixed(4)}f}${isLast ? '' : ','}`;
+                    if (idx % 3 === 2 && !isLast) code += '\n';
+                    else if (!isLast) code += ' ';
+                });
+                code += `\n};\n\n`;
+            });
+
+            code += `// Add this to your preset selection in transform() function:\n`;
+            code += `// } else if (preset == X) { // ${presetName}\n`;
+
+            const curveNames = ['hueVsHue', 'hueVsSat', 'hueVsLum', 'satVsSat', 'satVsLum', 'lumVsSat', 'lumVsLum', 'redCurve', 'greenCurve', 'blueCurve'];
+            curveNames.forEach(name => {
+                const arrayName = name.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+                const constantName = `${arrayName}_${presetName}`;
+                const sizeName = `size_${name}`;
+                const points = curves[name].getData();
+                code += `//     ${name} = ${constantName}; ${sizeName} = ${points.length};\n`;
+            });
+
+            code += `//     preset_saturation = 1.0f;\n`;
+            code += `//     preset_contrast = 1.0f;\n`;
+            code += `// }\n`;
+
+            navigator.clipboard.writeText(code).then(() => {
+                alert('✅ DCTL preset code copied to clipboard!\n\nPaste this into your base7.dctl file.');
+            });
+        }
+
+        // Export JSON
+        function exportJSON() {
+            const data = {};
+            Object.entries(curves).forEach(([name, curve]) => {
+                data[name] = curve.getData();
+            });
+
+            const json = JSON.stringify(data, null, 2);
+            navigator.clipboard.writeText(json).then(() => {
+                alert('✅ JSON data copied to clipboard!');
+            });
+        }
+
+        // Initialize
+        updateVectorscopes();
+        updateTestImage();
+        updateStats();
+    </script>
+</body>
+</html>
