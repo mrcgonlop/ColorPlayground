@@ -1,0 +1,714 @@
+// ============================================================================
+// FILM EMULATION DCTL - COMPLETE SYSTEM
+// ============================================================================
+// Professional parametric film emulation with:
+// - DaVinci Wide Gamut / Rec.709 input/output handling
+// - 3 color space modes (HSV, LCH, YCbCr)
+// - 7 parametric curves + per-channel curves
+// - 6 film presets + custom slot
+// - Organic highlight/shadow desaturation
+// ============================================================================
+
+DEFINE_UI_PARAMS(input_colorspace, Input Color Space, DCTLUI_COMBO_BOX, 0, {DWG, REC709, SRGB}, {DaVinci Wide Gamut, Rec.709, sRGB})
+DEFINE_UI_PARAMS(output_colorspace, Output Color Space, DCTLUI_COMBO_BOX, 0, {SAME, REC709_OUT}, {Same as Input, Rec.709})
+DEFINE_UI_PARAMS(working_colorspace, Working Color Space, DCTLUI_COMBO_BOX, 0, {HSV, LCH, YCBCR}, {HSV, LCH, YCbCr})
+DEFINE_UI_PARAMS(preset, Film Preset, DCTLUI_COMBO_BOX, 0, {NEUTRAL, VELVIA, PORTRA, CINESTILL, TEAL_ORANGE, AGFA, CUSTOM}, {Neutral, Fuji Velvia, Kodak Portra, Cinestill 800T, Teal & Orange, Agfa Vista, Custom})
+DEFINE_UI_PARAMS(global_exposure, Exposure, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 2.0, 0.01)
+DEFINE_UI_PARAMS(global_saturation, Saturation, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(global_contrast, Contrast, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 2.0, 0.01)
+DEFINE_UI_PARAMS(hue_shift, Hue Shift, DCTLUI_SLIDER_FLOAT, 0.0, -180.0, 180.0, 1.0)
+DEFINE_UI_PARAMS(highlight_desat, Highlight Desaturation, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(shadow_desat, Shadow Desaturation, DCTLUI_SLIDER_FLOAT, 0.3, 0.0, 1.0, 0.01)
+
+// ============================================================================
+// COLOR SPACE MATRICES
+// ============================================================================
+
+// DaVinci Wide Gamut to XYZ (D65)
+__CONSTANT__ float DWG_TO_XYZ[3][3] = {
+    {0.700622320175f, 0.148774802685f, 0.101058728993f},
+    {0.274118483067f, 0.873631775379f, -0.147750422359f},
+    {-0.098962903023f, -0.137895315886f, 1.325916051865f}
+};
+
+// XYZ to DaVinci Wide Gamut
+__CONSTANT__ float XYZ_TO_DWG[3][3] = {
+    {1.512205958366f, -0.236214995384f, -0.095667056739f},
+    {-0.461994469166f, 1.204409718513f, 0.025726420060f},
+    {0.077355667949f, 0.109971389174f, 0.764165461063f}
+};
+
+// Rec.709 to XYZ (D65)
+__CONSTANT__ float REC709_TO_XYZ[3][3] = {
+    {0.412391f, 0.357584f, 0.180481f},
+    {0.212639f, 0.715169f, 0.072192f},
+    {0.019331f, 0.119195f, 0.950532f}
+};
+
+// XYZ to Rec.709
+__CONSTANT__ float XYZ_TO_REC709[3][3] = {
+    {3.240970f, -1.537383f, -0.498611f},
+    {-0.969244f, 1.875968f, 0.041555f},
+    {0.055630f, -0.203977f, 1.056972f}
+};
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+__DEVICE__ float fmod_positive(float a, float b) {
+    float result = _fmod(a, b);
+    return (result < 0.0f) ? result + b : result;
+}
+
+__DEVICE__ float clamp(float x, float min_val, float max_val) {
+    return _fmaxf(min_val, _fminf(max_val, x));
+}
+
+__DEVICE__ float3 matrix_multiply(float mat[3][3], float3 vec) {
+    return make_float3(
+        mat[0][0] * vec.x + mat[0][1] * vec.y + mat[0][2] * vec.z,
+        mat[1][0] * vec.x + mat[1][1] * vec.y + mat[1][2] * vec.z,
+        mat[2][0] * vec.x + mat[2][1] * vec.y + mat[2][2] * vec.z
+    );
+}
+
+// ============================================================================
+// COLOR SPACE CONVERSIONS - INPUT/OUTPUT
+// ============================================================================
+
+__DEVICE__ float3 input_transform(float3 rgb, int input_cs) {
+    // Transform input to linear working space
+    if (input_cs == 0) { // DWG - already linear
+        return rgb;
+    } else { // Rec.709 or sRGB - apply gamma
+        float r = (rgb.x <= 0.04045f) ? rgb.x / 12.92f : _powf((rgb.x + 0.055f) / 1.055f, 2.4f);
+        float g = (rgb.y <= 0.04045f) ? rgb.y / 12.92f : _powf((rgb.y + 0.055f) / 1.055f, 2.4f);
+        float b = (rgb.z <= 0.04045f) ? rgb.z / 12.92f : _powf((rgb.z + 0.055f) / 1.055f, 2.4f);
+        return make_float3(r, g, b);
+    }
+}
+
+__DEVICE__ float3 output_transform(float3 rgb_linear, int input_cs, int output_cs) {
+    // If output is "same as input", just reverse input transform
+    if (output_cs == 0) { // SAME
+        if (input_cs == 0) { // DWG - stay linear
+            return rgb_linear;
+        } else { // Rec.709/sRGB - apply gamma
+            float r = (rgb_linear.x <= 0.0031308f) ? rgb_linear.x * 12.92f : 1.055f * _powf(rgb_linear.x, 1.0f/2.4f) - 0.055f;
+            float g = (rgb_linear.y <= 0.0031308f) ? rgb_linear.y * 12.92f : 1.055f * _powf(rgb_linear.y, 1.0f/2.4f) - 0.055f;
+            float b = (rgb_linear.z <= 0.0031308f) ? rgb_linear.z * 12.92f : 1.055f * _powf(rgb_linear.z, 1.0f/2.4f) - 0.055f;
+            return make_float3(r, g, b);
+        }
+    } else { // REC709_OUT
+        // Convert to Rec.709 with gamma
+        float r = (rgb_linear.x <= 0.0031308f) ? rgb_linear.x * 12.92f : 1.055f * _powf(rgb_linear.x, 1.0f/2.4f) - 0.055f;
+        float g = (rgb_linear.y <= 0.0031308f) ? rgb_linear.y * 12.92f : 1.055f * _powf(rgb_linear.y, 1.0f/2.4f) - 0.055f;
+        float b = (rgb_linear.z <= 0.0031308f) ? rgb_linear.z * 12.92f : 1.055f * _powf(rgb_linear.z, 1.0f/2.4f) - 0.055f;
+        return make_float3(r, g, b);
+    }
+}
+
+// ============================================================================
+// COLOR SPACE CONVERSIONS - WORKING SPACES
+// ============================================================================
+
+// RGB to HSV
+__DEVICE__ float3 rgb_to_hsv(float3 rgb) {
+    float r = rgb.x;
+    float g = rgb.y;
+    float b = rgb.z;
+    
+    float cmax = _fmaxf(r, _fmaxf(g, b));
+    float cmin = _fminf(r, _fminf(g, b));
+    float delta = cmax - cmin;
+    
+    float h = 0.0f;
+    if (delta > 0.0f) {
+        if (cmax == r) {
+            h = 60.0f * fmod_positive((g - b) / delta, 6.0f);
+        } else if (cmax == g) {
+            h = 60.0f * (((b - r) / delta) + 2.0f);
+        } else {
+            h = 60.0f * (((r - g) / delta) + 4.0f);
+        }
+    }
+    
+    float s = (cmax == 0.0f) ? 0.0f : delta / cmax;
+    float v = cmax;
+    
+    return make_float3(h, s, v);
+}
+
+// HSV to RGB
+__DEVICE__ float3 hsv_to_rgb(float3 hsv) {
+    float h = hsv.x;
+    float s = hsv.y;
+    float v = hsv.z;
+    
+    float c = v * s;
+    float x = c * (1.0f - _fabs(fmod_positive(h / 60.0f, 2.0f) - 1.0f));
+    float m = v - c;
+    
+    float r, g, b;
+    
+    if (h >= 0.0f && h < 60.0f) {
+        r = c; g = x; b = 0.0f;
+    } else if (h >= 60.0f && h < 120.0f) {
+        r = x; g = c; b = 0.0f;
+    } else if (h >= 120.0f && h < 180.0f) {
+        r = 0.0f; g = c; b = x;
+    } else if (h >= 180.0f && h < 240.0f) {
+        r = 0.0f; g = x; b = c;
+    } else if (h >= 240.0f && h < 300.0f) {
+        r = x; g = 0.0f; b = c;
+    } else {
+        r = c; g = 0.0f; b = x;
+    }
+    
+    return make_float3(r + m, g + m, b + m);
+}
+
+// RGB to LCH (via XYZ and Lab)
+__DEVICE__ float3 rgb_to_lch(float3 rgb) {
+    // RGB is already linear, convert to XYZ (using Rec.709 for simplicity)
+    float x = rgb.x * 0.4124f + rgb.y * 0.3576f + rgb.z * 0.1805f;
+    float y = rgb.x * 0.2126f + rgb.y * 0.7152f + rgb.z * 0.0722f;
+    float z = rgb.x * 0.0193f + rgb.y * 0.1192f + rgb.z * 0.9505f;
+    
+    // XYZ to Lab (D65 white point)
+    x = x / 0.95047f;
+    y = y / 1.00000f;
+    z = z / 1.08883f;
+    
+    x = (x > 0.008856f) ? _powf(x, 1.0f/3.0f) : (7.787f * x) + 16.0f/116.0f;
+    y = (y > 0.008856f) ? _powf(y, 1.0f/3.0f) : (7.787f * y) + 16.0f/116.0f;
+    z = (z > 0.008856f) ? _powf(z, 1.0f/3.0f) : (7.787f * z) + 16.0f/116.0f;
+    
+    float L = (116.0f * y) - 16.0f;
+    float a = 500.0f * (x - y);
+    float b_lab = 200.0f * (y - z);
+    
+    // Lab to LCH
+    float C = _sqrtf(a * a + b_lab * b_lab);
+    float H = _atan2f(b_lab, a) * 180.0f / 3.14159265359f;
+    if (H < 0.0f) H += 360.0f;
+    
+    return make_float3(L / 100.0f, C / 128.0f, H); // Normalize L and C
+}
+
+// LCH to RGB
+__DEVICE__ float3 lch_to_rgb(float3 lch) {
+    float L = lch.x * 100.0f;
+    float C = lch.y * 128.0f;
+    float H = lch.z;
+    
+    // LCH to Lab
+    float a = C * _cosf(H * 3.14159265359f / 180.0f);
+    float b_lab = C * _sinf(H * 3.14159265359f / 180.0f);
+    
+    // Lab to XYZ
+    float y = (L + 16.0f) / 116.0f;
+    float x = a / 500.0f + y;
+    float z = y - b_lab / 200.0f;
+    
+    x = (x > 0.206897f) ? _powf(x, 3.0f) : (x - 16.0f/116.0f) / 7.787f;
+    y = (y > 0.206897f) ? _powf(y, 3.0f) : (y - 16.0f/116.0f) / 7.787f;
+    z = (z > 0.206897f) ? _powf(z, 3.0f) : (z - 16.0f/116.0f) / 7.787f;
+    
+    x *= 0.95047f;
+    y *= 1.00000f;
+    z *= 1.08883f;
+    
+    // XYZ to RGB (Rec.709 primaries)
+    float r =  x *  3.2406f + y * -1.5372f + z * -0.4986f;
+    float g =  x * -0.9689f + y *  1.8758f + z *  0.0415f;
+    float b =  x *  0.0557f + y * -0.2040f + z *  1.0570f;
+    
+    return make_float3(clamp(r, 0.0f, 1.0f), clamp(g, 0.0f, 1.0f), clamp(b, 0.0f, 1.0f));
+}
+
+// RGB to YCbCr
+__DEVICE__ float3 rgb_to_ycbcr(float3 rgb) {
+    float y  =  0.299f * rgb.x + 0.587f * rgb.y + 0.114f * rgb.z;
+    float cb = -0.169f * rgb.x - 0.331f * rgb.y + 0.500f * rgb.z + 0.5f;
+    float cr =  0.500f * rgb.x - 0.419f * rgb.y - 0.081f * rgb.z + 0.5f;
+    return make_float3(y, cb, cr);
+}
+
+// YCbCr to RGB
+__DEVICE__ float3 ycbcr_to_rgb(float3 ycbcr) {
+    float y = ycbcr.x;
+    float cb = ycbcr.y - 0.5f;
+    float cr = ycbcr.z - 0.5f;
+    
+    float r = y + 1.402f * cr;
+    float g = y - 0.344f * cb - 0.714f * cr;
+    float b = y + 1.772f * cb;
+    
+    return make_float3(clamp(r, 0.0f, 1.0f), clamp(g, 0.0f, 1.0f), clamp(b, 0.0f, 1.0f));
+}
+
+// ============================================================================
+// CUBIC SPLINE INTERPOLATION
+// ============================================================================
+
+__DEVICE__ float cubic_spline_interpolate(float x, const float curve[][2], int size) {
+    if (x <= curve[0][0]) return curve[0][1];
+    if (x >= curve[size-1][0]) return curve[size-1][1];
+    
+    for (int i = 0; i < size - 1; i++) {
+        float x1 = curve[i][0];
+        float y1 = curve[i][1];
+        float x2 = curve[i+1][0];
+        float y2 = curve[i+1][1];
+        
+        if (x >= x1 && x <= x2) {
+            float t = (x - x1) / (x2 - x1);
+            
+            float x0 = (i > 0) ? curve[i-1][0] : x1;
+            float y0 = (i > 0) ? curve[i-1][1] : y1;
+            float x3 = (i < size - 2) ? curve[i+2][0] : x2;
+            float y3 = (i < size - 2) ? curve[i+2][1] : y2;
+            
+            float m1 = (i > 0) ? (y2 - y0) / (x2 - x0) : (y2 - y1) / (x2 - x1);
+            float m2 = (i < size - 2) ? (y3 - y1) / (x3 - x1) : (y2 - y1) / (x2 - x1);
+            
+            float t2 = t * t;
+            float t3 = t2 * t;
+            float h00 = 2.0f * t3 - 3.0f * t2 + 1.0f;
+            float h10 = t3 - 2.0f * t2 + t;
+            float h01 = -2.0f * t3 + 3.0f * t2;
+            float h11 = t3 - t2;
+            
+            return h00 * y1 + h10 * (x2 - x1) * m1 + h01 * y2 + h11 * (x2 - x1) * m2;
+        }
+    }
+    
+    return curve[size-1][1];
+}
+
+// ============================================================================
+// ORGANIC HIGHLIGHT/SHADOW DESATURATION
+// ============================================================================
+
+__DEVICE__ float organic_lum_desat(float luminance, float shadow_desat, float highlight_desat) {
+    float shadow_factor = 1.0f;
+    if (luminance < 0.3f) {
+        float t = luminance / 0.3f;
+        float shadow_curve = t * t * (3.0f - 2.0f * t);
+        shadow_factor = 1.0f - shadow_desat * (1.0f - shadow_curve);
+    }
+    
+    float highlight_factor = 1.0f;
+    if (luminance > 0.7f) {
+        float t = (luminance - 0.7f) / 0.3f;
+        float highlight_curve = t * t * (3.0f - 2.0f * t);
+        highlight_factor = 1.0f - highlight_desat * highlight_curve;
+    }
+    
+    return shadow_factor * highlight_factor;
+}
+
+// ============================================================================
+// PRESET CURVE DATA
+// ============================================================================
+
+// Include all preset data here (Neutral, Velvia, Portra, Cinestill, Teal&Orange, Agfa, Custom)
+// [I'll add complete presets in next message to keep this readable]
+
+// NEUTRAL PRESET
+__CONSTANT__ float hueVsHue_NEUTRAL[][2] = {{0.0f, 0.0f}, {360.0f, 0.0f}};
+__CONSTANT__ float hueVsSat_NEUTRAL[][2] = {{0.0f, 1.0f}, {360.0f, 1.0f}};
+__CONSTANT__ float hueVsLum_NEUTRAL[][2] = {{0.0f, 0.0f}, {360.0f, 0.0f}};
+__CONSTANT__ float satVsSat_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float satVsLum_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
+__CONSTANT__ float lumVsSat_NEUTRAL[][2] = {{0.0f, 1.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float lumVsLum_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float redCurve_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float greenCurve_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float blueCurve_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+
+// FUJI VELVIA PRESET
+__CONSTANT__ float hueVsHue_VELVIA[][2] = {
+    {0.0f, 5.0f}, {60.0f, 10.0f}, {120.0f, -5.0f}, {180.0f, 0.0f}, 
+    {240.0f, 5.0f}, {300.0f, 0.0f}, {360.0f, 5.0f}
+};
+__CONSTANT__ float hueVsSat_VELVIA[][2] = {
+    {0.0f, 1.15f}, {60.0f, 1.25f}, {120.0f, 1.35f}, {180.0f, 1.2f}, 
+    {240.0f, 1.3f}, {300.0f, 1.1f}, {360.0f, 1.15f}
+};
+__CONSTANT__ float hueVsLum_VELVIA[][2] = {
+    {0.0f, 0.0f}, {60.0f, 0.03f}, {120.0f, 0.0f}, {180.0f, -0.02f}, 
+    {240.0f, -0.02f}, {300.0f, 0.0f}, {360.0f, 0.0f}
+};
+__CONSTANT__ float satVsSat_VELVIA[][2] = {
+    {0.0f, 0.0f}, {0.3f, 0.32f}, {0.6f, 0.65f}, {0.85f, 0.88f}, {1.0f, 0.95f}
+};
+__CONSTANT__ float satVsLum_VELVIA[][2] = {
+    {0.0f, 0.0f}, {0.5f, -0.01f}, {1.0f, -0.03f}
+};
+__CONSTANT__ float lumVsSat_VELVIA[][2] = {
+    {0.0f, 0.8f}, {0.2f, 1.0f}, {0.5f, 1.0f}, {0.8f, 0.95f}, {1.0f, 0.85f}
+};
+__CONSTANT__ float lumVsLum_VELVIA[][2] = {
+    {0.0f, 0.0f}, {0.15f, 0.18f}, {0.35f, 0.38f}, {0.5f, 0.5f}, 
+    {0.7f, 0.68f}, {0.88f, 0.88f}, {1.0f, 1.0f}
+};
+__CONSTANT__ float redCurve_VELVIA[][2] = {{0.0f, 0.0f}, {0.5f, 0.52f}, {1.0f, 1.0f}};
+__CONSTANT__ float greenCurve_VELVIA[][2] = {{0.0f, 0.0f}, {0.5f, 0.49f}, {1.0f, 0.99f}};
+__CONSTANT__ float blueCurve_VELVIA[][2] = {{0.0f, 0.0f}, {0.5f, 0.50f}, {1.0f, 1.0f}};
+
+// KODAK PORTRA PRESET
+__CONSTANT__ float hueVsHue_PORTRA[][2] = {
+    {0.0f, -2.0f}, {30.0f, 3.0f}, {60.0f, 3.0f}, {120.0f, 0.0f}, 
+    {180.0f, -3.0f}, {240.0f, -3.0f}, {300.0f, 0.0f}, {360.0f, -2.0f}
+};
+__CONSTANT__ float hueVsSat_PORTRA[][2] = {
+    {0.0f, 0.95f}, {30.0f, 1.0f}, {60.0f, 0.98f}, {120.0f, 0.9f}, 
+    {180.0f, 0.93f}, {240.0f, 0.9f}, {300.0f, 0.95f}, {360.0f, 0.95f}
+};
+__CONSTANT__ float hueVsLum_PORTRA[][2] = {
+    {0.0f, 0.0f}, {30.0f, 0.02f}, {60.0f, 0.015f}, {120.0f, 0.0f}, 
+    {180.0f, 0.0f}, {240.0f, 0.0f}, {300.0f, 0.0f}, {360.0f, 0.0f}
+};
+__CONSTANT__ float satVsSat_PORTRA[][2] = {
+    {0.0f, 0.0f}, {0.4f, 0.38f}, {0.7f, 0.68f}, {1.0f, 0.92f}
+};
+__CONSTANT__ float satVsLum_PORTRA[][2] = {
+    {0.0f, 0.0f}, {0.5f, -0.005f}, {1.0f, -0.015f}
+};
+__CONSTANT__ float lumVsSat_PORTRA[][2] = {
+    {0.0f, 0.7f}, {0.2f, 0.9f}, {0.5f, 1.0f}, {0.8f, 0.95f}, {1.0f, 0.8f}
+};
+__CONSTANT__ float lumVsLum_PORTRA[][2] = {
+    {0.0f, 0.01f}, {0.15f, 0.16f}, {0.35f, 0.36f}, {0.5f, 0.5f}, 
+    {0.7f, 0.71f}, {0.88f, 0.91f}, {1.0f, 0.99f}
+};
+__CONSTANT__ float redCurve_PORTRA[][2] = {{0.0f, 0.0f}, {0.5f, 0.49f}, {1.0f, 0.99f}};
+__CONSTANT__ float greenCurve_PORTRA[][2] = {{0.0f, 0.01f}, {0.5f, 0.50f}, {1.0f, 1.0f}};
+__CONSTANT__ float blueCurve_PORTRA[][2] = {{0.0f, 0.0f}, {0.5f, 0.51f}, {1.0f, 1.0f}};
+
+// CINESTILL 800T PRESET
+__CONSTANT__ float hueVsHue_CINESTILL[][2] = {
+    {0.0f, 10.0f}, {60.0f, 10.0f}, {120.0f, -5.0f}, {180.0f, -10.0f}, 
+    {240.0f, -8.0f}, {300.0f, 5.0f}, {360.0f, 10.0f}
+};
+__CONSTANT__ float hueVsSat_CINESTILL[][2] = {
+    {0.0f, 1.15f}, {60.0f, 1.1f}, {120.0f, 0.98f}, {180.0f, 1.1f}, 
+    {240.0f, 1.25f}, {300.0f, 1.12f}, {360.0f, 1.15f}
+};
+__CONSTANT__ float hueVsLum_CINESTILL[][2] = {
+    {0.0f, 0.03f}, {60.0f, 0.02f}, {120.0f, 0.0f}, {180.0f, -0.03f}, 
+    {240.0f, -0.02f}, {300.0f, 0.0f}, {360.0f, 0.03f}
+};
+__CONSTANT__ float satVsSat_CINESTILL[][2] = {
+    {0.0f, 0.0f}, {0.3f, 0.31f}, {0.6f, 0.63f}, {0.85f, 0.88f}, {1.0f, 0.96f}
+};
+__CONSTANT__ float satVsLum_CINESTILL[][2] = {
+    {0.0f, 0.0f}, {0.6f, 0.01f}, {1.0f, 0.02f}
+};
+__CONSTANT__ float lumVsSat_CINESTILL[][2] = {
+    {0.0f, 0.85f}, {0.2f, 1.0f}, {0.5f, 1.05f}, {0.8f, 1.1f}, {1.0f, 1.0f}
+};
+__CONSTANT__ float lumVsLum_CINESTILL[][2] = {
+    {0.0f, 0.0f}, {0.18f, 0.21f}, {0.38f, 0.42f}, {0.5f, 0.52f}, 
+    {0.7f, 0.73f}, {0.88f, 0.91f}, {1.0f, 1.0f}
+};
+__CONSTANT__ float redCurve_CINESTILL[][2] = {{0.0f, 0.0f}, {0.5f, 0.52f}, {1.0f, 1.0f}};
+__CONSTANT__ float greenCurve_CINESTILL[][2] = {{0.0f, 0.0f}, {0.5f, 0.50f}, {1.0f, 1.0f}};
+__CONSTANT__ float blueCurve_CINESTILL[][2] = {{0.0f, 0.0f}, {0.5f, 0.48f}, {1.0f, 0.98f}};
+
+// TEAL & ORANGE PRESET
+__CONSTANT__ float hueVsHue_TEAL_ORANGE[][2] = {
+    {0.0f, 12.0f}, {30.0f, 18.0f}, {60.0f, 8.0f}, {120.0f, 0.0f}, 
+    {180.0f, -12.0f}, {200.0f, -18.0f}, {240.0f, -8.0f}, {300.0f, 5.0f}, {360.0f, 12.0f}
+};
+__CONSTANT__ float hueVsSat_TEAL_ORANGE[][2] = {
+    {0.0f, 1.25f}, {30.0f, 1.35f}, {60.0f, 1.15f}, {120.0f, 0.92f}, 
+    {180.0f, 1.35f}, {200.0f, 1.4f}, {240.0f, 1.15f}, {300.0f, 1.0f}, {360.0f, 1.25f}
+};
+__CONSTANT__ float hueVsLum_TEAL_ORANGE[][2] = {
+    {0.0f, 0.015f}, {60.0f, 0.02f}, {120.0f, -0.015f}, {180.0f, 0.0f}, 
+    {240.0f, -0.02f}, {300.0f, 0.0f}, {360.0f, 0.015f}
+};
+__CONSTANT__ float satVsSat_TEAL_ORANGE[][2] = {
+    {0.0f, 0.0f}, {0.35f, 0.38f}, {0.65f, 0.7f}, {0.9f, 0.93f}, {1.0f, 0.98f}
+};
+__CONSTANT__ float satVsLum_TEAL_ORANGE[][2] = {
+    {0.0f, 0.0f}, {0.55f, -0.008f}, {1.0f, -0.015f}
+};
+__CONSTANT__ float lumVsSat_TEAL_ORANGE[][2] = {
+    {0.0f, 0.75f}, {0.3f, 1.05f}, {0.6f, 1.15f}, {0.85f, 0.95f}, {1.0f, 0.75f}
+};
+__CONSTANT__ float lumVsLum_TEAL_ORANGE[][2] = {
+    {0.0f, 0.03f}, {0.22f, 0.24f}, {0.5f, 0.5f}, {0.8f, 0.83f}, {1.0f, 0.96f}
+};
+__CONSTANT__ float redCurve_TEAL_ORANGE[][2] = {{0.0f, 0.0f}, {0.5f, 0.51f}, {1.0f, 1.0f}};
+__CONSTANT__ float greenCurve_TEAL_ORANGE[][2] = {{0.0f, 0.0f}, {0.5f, 0.50f}, {1.0f, 1.0f}};
+__CONSTANT__ float blueCurve_TEAL_ORANGE[][2] = {{0.0f, 0.0f}, {0.5f, 0.49f}, {1.0f, 1.0f}};
+
+// AGFA VISTA PRESET
+__CONSTANT__ float hueVsHue_AGFA[][2] = {
+    {0.0f, 6.0f}, {60.0f, 10.0f}, {120.0f, 4.0f}, {180.0f, -4.0f}, 
+    {240.0f, -2.0f}, {300.0f, 4.0f}, {360.0f, 6.0f}
+};
+__CONSTANT__ float hueVsSat_AGFA[][2] = {
+    {0.0f, 1.08f}, {60.0f, 1.2f}, {120.0f, 1.15f}, {180.0f, 1.0f}, 
+    {240.0f, 0.98f}, {300.0f, 1.05f}, {360.0f, 1.08f}
+};
+__CONSTANT__ float hueVsLum_AGFA[][2] = {
+    {0.0f, 0.015f}, {60.0f, 0.03f}, {120.0f, 0.008f}, {180.0f, 0.0f}, 
+    {240.0f, -0.008f}, {300.0f, 0.0f}, {360.0f, 0.015f}
+};
+__CONSTANT__ float satVsSat_AGFA[][2] = {
+    {0.0f, 0.0f}, {0.4f, 0.42f}, {0.72f, 0.76f}, {1.0f, 0.98f}
+};
+__CONSTANT__ float satVsLum_AGFA[][2] = {
+    {0.0f, 0.0f}, {0.5f, 0.0f}, {1.0f, 0.005f}
+};
+__CONSTANT__ float lumVsSat_AGFA[][2] = {
+    {0.0f, 0.78f}, {0.3f, 1.02f}, {0.6f, 1.08f}, {1.0f, 0.92f}
+};
+__CONSTANT__ float lumVsLum_AGFA[][2] = {
+    {0.0f, 0.0f}, {0.25f, 0.26f}, {0.5f, 0.5f}, {0.75f, 0.76f}, {1.0f, 1.0f}
+};
+__CONSTANT__ float redCurve_AGFA[][2] = {{0.0f, 0.0f}, {0.5f, 0.49f}, {1.0f, 0.99f}};
+__CONSTANT__ float greenCurve_AGFA[][2] = {{0.0f, 0.0f}, {0.5f, 0.50f}, {1.0f, 1.0f}};
+__CONSTANT__ float blueCurve_AGFA[][2] = {{0.0f, 0.008f}, {0.5f, 0.51f}, {1.0f, 1.0f}};
+
+// CUSTOM PRESET - Paste exported curve data here
+__CONSTANT__ float hueVsHue_CUSTOM[][2] = {{0.0f, 0.0f}, {360.0f, 0.0f}};
+__CONSTANT__ float hueVsSat_CUSTOM[][2] = {{0.0f, 1.0f}, {360.0f, 1.0f}};
+__CONSTANT__ float hueVsLum_CUSTOM[][2] = {{0.0f, 0.0f}, {360.0f, 0.0f}};
+__CONSTANT__ float satVsSat_CUSTOM[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float satVsLum_CUSTOM[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
+__CONSTANT__ float lumVsSat_CUSTOM[][2] = {{0.0f, 1.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float lumVsLum_CUSTOM[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float redCurve_CUSTOM[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float greenCurve_CUSTOM[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float blueCurve_CUSTOM[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+
+// ============================================================================
+// MAIN TRANSFORM
+// ============================================================================
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, float p_B) {
+    float3 rgb = make_float3(p_R, p_G, p_B);
+    
+    // ========================================================================
+    // INPUT COLOR SPACE HANDLING
+    // ========================================================================
+    rgb = input_transform(rgb, input_colorspace);
+    
+    // ========================================================================
+    // SELECT PRESET CURVES
+    // ========================================================================
+    const float (*hueVsHue)[2];
+    const float (*hueVsSat)[2];
+    const float (*hueVsLum)[2];
+    const float (*satVsSat)[2];
+    const float (*satVsLum)[2];
+    const float (*lumVsSat)[2];
+    const float (*lumVsLum)[2];
+    const float (*redCurve)[2];
+    const float (*greenCurve)[2];
+    const float (*blueCurve)[2];
+    
+    int size_hueVsHue, size_hueVsSat, size_hueVsLum;
+    int size_satVsSat, size_satVsLum, size_lumVsSat, size_lumVsLum;
+    int size_redCurve, size_greenCurve, size_blueCurve;
+    
+    float preset_saturation = 1.0f;
+    float preset_contrast = 1.0f;
+    
+    if (preset == 0) { // NEUTRAL
+        hueVsHue = hueVsHue_NEUTRAL; size_hueVsHue = 2;
+        hueVsSat = hueVsSat_NEUTRAL; size_hueVsSat = 2;
+        hueVsLum = hueVsLum_NEUTRAL; size_hueVsLum = 2;
+        satVsSat = satVsSat_NEUTRAL; size_satVsSat = 2;
+        satVsLum = satVsLum_NEUTRAL; size_satVsLum = 2;
+        lumVsSat = lumVsSat_NEUTRAL; size_lumVsSat = 2;
+        lumVsLum = lumVsLum_NEUTRAL; size_lumVsLum = 2;
+        redCurve = redCurve_NEUTRAL; size_redCurve = 2;
+        greenCurve = greenCurve_NEUTRAL; size_greenCurve = 2;
+        blueCurve = blueCurve_NEUTRAL; size_blueCurve = 2;
+    } else if (preset == 1) { // VELVIA
+        hueVsHue = hueVsHue_VELVIA; size_hueVsHue = 7;
+        hueVsSat = hueVsSat_VELVIA; size_hueVsSat = 7;
+        hueVsLum = hueVsLum_VELVIA; size_hueVsLum = 7;
+        satVsSat = satVsSat_VELVIA; size_satVsSat = 5;
+        satVsLum = satVsLum_VELVIA; size_satVsLum = 3;
+        lumVsSat = lumVsSat_VELVIA; size_lumVsSat = 5;
+        lumVsLum = lumVsLum_VELVIA; size_lumVsLum = 7;
+        redCurve = redCurve_VELVIA; size_redCurve = 3;
+        greenCurve = greenCurve_VELVIA; size_greenCurve = 3;
+        blueCurve = blueCurve_VELVIA; size_blueCurve = 3;
+        preset_saturation = 1.08f;
+        preset_contrast = 1.12f;
+    } else if (preset == 2) { // PORTRA
+        hueVsHue = hueVsHue_PORTRA; size_hueVsHue = 8;
+        hueVsSat = hueVsSat_PORTRA; size_hueVsSat = 8;
+        hueVsLum = hueVsLum_PORTRA; size_hueVsLum = 8;
+        satVsSat = satVsSat_PORTRA; size_satVsSat = 4;
+        satVsLum = satVsLum_PORTRA; size_satVsLum = 3;
+        lumVsSat = lumVsSat_PORTRA; size_lumVsSat = 5;
+        lumVsLum = lumVsLum_PORTRA; size_lumVsLum = 7;
+        redCurve = redCurve_PORTRA; size_redCurve = 3;
+        greenCurve = greenCurve_PORTRA; size_greenCurve = 3;
+        blueCurve = blueCurve_PORTRA; size_blueCurve = 3;
+        preset_saturation = 0.95f;
+        preset_contrast = 0.98f;
+    } else if (preset == 3) { // CINESTILL
+        hueVsHue = hueVsHue_CINESTILL; size_hueVsHue = 7;
+        hueVsSat = hueVsSat_CINESTILL; size_hueVsSat = 7;
+        hueVsLum = hueVsLum_CINESTILL; size_hueVsLum = 7;
+        satVsSat = satVsSat_CINESTILL; size_satVsSat = 5;
+        satVsLum = satVsLum_CINESTILL; size_satVsLum = 3;
+        lumVsSat = lumVsSat_CINESTILL; size_lumVsSat = 5;
+        lumVsLum = lumVsLum_CINESTILL; size_lumVsLum = 7;
+        redCurve = redCurve_CINESTILL; size_redCurve = 3;
+        greenCurve = greenCurve_CINESTILL; size_greenCurve = 3;
+        blueCurve = blueCurve_CINESTILL; size_blueCurve = 3;
+        preset_saturation = 1.05f;
+        preset_contrast = 1.08f;
+    } else if (preset == 4) { // TEAL_ORANGE
+        hueVsHue = hueVsHue_TEAL_ORANGE; size_hueVsHue = 9;
+        hueVsSat = hueVsSat_TEAL_ORANGE; size_hueVsSat = 9;
+        hueVsLum = hueVsLum_TEAL_ORANGE; size_hueVsLum = 7;
+        satVsSat = satVsSat_TEAL_ORANGE; size_satVsSat = 5;
+        satVsLum = satVsLum_TEAL_ORANGE; size_satVsLum = 3;
+        lumVsSat = lumVsSat_TEAL_ORANGE; size_lumVsSat = 5;
+        lumVsLum = lumVsLum_TEAL_ORANGE; size_lumVsLum = 5;
+        redCurve = redCurve_TEAL_ORANGE; size_redCurve = 3;
+        greenCurve = greenCurve_TEAL_ORANGE; size_greenCurve = 3;
+        blueCurve = blueCurve_TEAL_ORANGE; size_blueCurve = 3;
+        preset_saturation = 1.15f;
+        preset_contrast = 1.12f;
+    } else if (preset == 5) { // AGFA
+        hueVsHue = hueVsHue_AGFA; size_hueVsHue = 7;
+        hueVsSat = hueVsSat_AGFA; size_hueVsSat = 7;
+        hueVsLum = hueVsLum_AGFA; size_hueVsLum = 7;
+        satVsSat = satVsSat_AGFA; size_satVsSat = 4;
+        satVsLum = satVsLum_AGFA; size_satVsLum = 3;
+        lumVsSat = lumVsSat_AGFA; size_lumVsSat = 4;
+        lumVsLum = lumVsLum_AGFA; size_lumVsLum = 5;
+        redCurve = redCurve_AGFA; size_redCurve = 3;
+        greenCurve = greenCurve_AGFA; size_greenCurve = 3;
+        blueCurve = blueCurve_AGFA; size_blueCurve = 3;
+        preset_saturation = 1.08f;
+        preset_contrast = 1.0f;
+    } else { // CUSTOM
+        hueVsHue = hueVsHue_CUSTOM; size_hueVsHue = 2;
+        hueVsSat = hueVsSat_CUSTOM; size_hueVsSat = 2;
+        hueVsLum = hueVsLum_CUSTOM; size_hueVsLum = 2;
+        satVsSat = satVsSat_CUSTOM; size_satVsSat = 2;
+        satVsLum = satVsLum_CUSTOM; size_satVsLum = 2;
+        lumVsSat = lumVsSat_CUSTOM; size_lumVsSat = 2;
+        lumVsLum = lumVsLum_CUSTOM; size_lumVsLum = 2;
+        redCurve = redCurve_CUSTOM; size_redCurve = 2;
+        greenCurve = greenCurve_CUSTOM; size_greenCurve = 2;
+        blueCurve = blueCurve_CUSTOM; size_blueCurve = 2;
+    }
+    
+    // Combine preset and user parameters
+    float final_saturation = global_saturation * preset_saturation;
+    float final_contrast = global_contrast * preset_contrast;
+    
+    // ========================================================================
+    // CONVERT TO WORKING COLOR SPACE
+    // ========================================================================
+    float h, s, v;
+    
+    if (working_colorspace == 0) { // HSV
+        float3 hsv = rgb_to_hsv(rgb);
+        h = hsv.x; s = hsv.y; v = hsv.z;
+    } else if (working_colorspace == 1) { // LCH
+        float3 lch = rgb_to_lch(rgb);
+        v = lch.x; s = lch.y; h = lch.z;
+    } else { // YCbCr
+        float3 ycbcr = rgb_to_ycbcr(rgb);
+        v = ycbcr.x;
+        float cb = ycbcr.y - 0.5f;
+        float cr = ycbcr.z - 0.5f;
+        s = _sqrtf(cb * cb + cr * cr) * 2.0f;
+        h = _atan2f(cr, cb) * 180.0f / 3.14159265359f;
+        if (h < 0.0f) h += 360.0f;
+    }
+    
+    // ========================================================================
+    // PARAMETRIC TRANSFORM PIPELINE
+    // ========================================================================
+    
+    // 1. Hue → Hue shift (+ global hue shift)
+    float hue_shift_curve = cubic_spline_interpolate(h, hueVsHue, size_hueVsHue);
+    h = fmod_positive(h + hue_shift_curve + hue_shift, 360.0f);
+    
+    // 2. Hue → Saturation
+    float sat_mult_hue = cubic_spline_interpolate(h, hueVsSat, size_hueVsSat);
+    s = clamp(s * sat_mult_hue, 0.0f, (working_colorspace == 1) ? 2.0f : 1.0f);
+    
+    // 3. Hue → Luminance
+    float lum_offset_hue = cubic_spline_interpolate(h, hueVsLum, size_hueVsLum);
+    v = clamp(v + lum_offset_hue, 0.0f, 1.0f);
+    
+    // 4. Saturation → Saturation (non-linear compression)
+    float sat_mapped = cubic_spline_interpolate(s, satVsSat, size_satVsSat);
+    s = clamp(sat_mapped, 0.0f, (working_colorspace == 1) ? 2.0f : 1.0f);
+    
+    // 5. Saturation → Luminance (film density)
+    float lum_offset_sat = cubic_spline_interpolate(s, satVsLum, size_satVsLum);
+    v = clamp(v + lum_offset_sat, 0.0f, 1.0f);
+    
+    // 6. Luminance → Saturation
+    float sat_mult_lum = cubic_spline_interpolate(v, lumVsSat, size_lumVsSat);
+    s = clamp(s * sat_mult_lum, 0.0f, (working_colorspace == 1) ? 2.0f : 1.0f);
+    
+    // Apply organic highlight/shadow desaturation
+    float desat_factor = organic_lum_desat(v, shadow_desat, highlight_desat);
+    s = clamp(s * desat_factor, 0.0f, (working_colorspace == 1) ? 2.0f : 1.0f);
+    
+    // Apply global saturation
+    s = clamp(s * final_saturation, 0.0f, (working_colorspace == 1) ? 2.0f : 1.0f);
+    
+    // 7. Luminance → Luminance (tone curve)
+    v = cubic_spline_interpolate(v, lumVsLum, size_lumVsLum);
+    
+    // Apply contrast around midpoint
+    v = 0.5f + (v - 0.5f) * final_contrast;
+    
+    // Apply exposure
+    v = clamp(v * global_exposure, 0.0f, 1.0f);
+    
+    // ========================================================================
+    // CONVERT BACK TO RGB
+    // ========================================================================
+    float3 rgb_out;
+    
+    if (working_colorspace == 0) { // HSV
+        rgb_out = hsv_to_rgb(make_float3(h, s, v));
+    } else if (working_colorspace == 1) { // LCH
+        rgb_out = lch_to_rgb(make_float3(v, s, h));
+    } else { // YCbCr
+        float cb = (s / 2.0f) * _cosf(h * 3.14159265359f / 180.0f) + 0.5f;
+        float cr = (s / 2.0f) * _sinf(h * 3.14159265359f / 180.0f) + 0.5f;
+        rgb_out = ycbcr_to_rgb(make_float3(v, cb, cr));
+    }
+    
+    // Per-channel curves (simulate film dye layers)
+    rgb_out.x = cubic_spline_interpolate(rgb_out.x, redCurve, size_redCurve);
+    rgb_out.y = cubic_spline_interpolate(rgb_out.y, greenCurve, size_greenCurve);
+    rgb_out.z = cubic_spline_interpolate(rgb_out.z, blueCurve, size_blueCurve);
+    
+    // Clamp to valid range
+    rgb_out.x = clamp(rgb_out.x, 0.0f, 1.0f);
+    rgb_out.y = clamp(rgb_out.y, 0.0f, 1.0f);
+    rgb_out.z = clamp(rgb_out.z, 0.0f, 1.0f);
+    
+    // ========================================================================
+    // OUTPUT COLOR SPACE HANDLING
+    // ========================================================================
+    rgb_out = output_transform(rgb_out, input_colorspace, output_colorspace);
+    
+    return rgb_out;
+}

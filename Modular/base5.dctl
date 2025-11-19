@@ -1,0 +1,369 @@
+// ============================================================================
+// FILM EMULATION - MODULE 3: COMPLETE 7-CURVE PARAMETRIC SYSTEM
+// ============================================================================
+// Full parametric color transform with all 7 curves + per-channel curves
+// Based on working Module 2, now with complete control
+// ============================================================================
+
+DEFINE_UI_PARAMS(preset, Film Preset, DCTLUI_COMBO_BOX, 0, {NEUTRAL, VELVIA, PORTRA}, {Neutral, Fuji Velvia, Kodak Portra})
+DEFINE_UI_PARAMS(global_exposure, Exposure, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 2.0, 0.01)
+DEFINE_UI_PARAMS(global_saturation, Saturation, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(global_contrast, Contrast, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 2.0, 0.01)
+DEFINE_UI_PARAMS(highlight_desat, Highlight Desaturation, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(shadow_desat, Shadow Desaturation, DCTLUI_SLIDER_FLOAT, 0.3, 0.0, 1.0, 0.01)
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+__DEVICE__ float fmod_positive(float a, float b) {
+    float result = _fmod(a, b);
+    return (result < 0.0f) ? result + b : result;
+}
+
+__DEVICE__ float clamp(float x, float min_val, float max_val) {
+    return _fmaxf(min_val, _fminf(max_val, x));
+}
+
+// ============================================================================
+// CUBIC SPLINE INTERPOLATION
+// ============================================================================
+
+__DEVICE__ float cubic_spline_interpolate(float x, const float curve[][2], int size) {
+    // Handle edge cases
+    if (x <= curve[0][0]) return curve[0][1];
+    if (x >= curve[size-1][0]) return curve[size-1][1];
+    
+    // Find the segment containing x
+    for (int i = 0; i < size - 1; i++) {
+        float x1 = curve[i][0];
+        float y1 = curve[i][1];
+        float x2 = curve[i+1][0];
+        float y2 = curve[i+1][1];
+        
+        if (x >= x1 && x <= x2) {
+            float t = (x - x1) / (x2 - x1);
+            
+            // Catmull-Rom tangents
+            float x0 = (i > 0) ? curve[i-1][0] : x1;
+            float y0 = (i > 0) ? curve[i-1][1] : y1;
+            float x3 = (i < size - 2) ? curve[i+2][0] : x2;
+            float y3 = (i < size - 2) ? curve[i+2][1] : y2;
+            
+            float m1 = (i > 0) ? (y2 - y0) / (x2 - x0) : (y2 - y1) / (x2 - x1);
+            float m2 = (i < size - 2) ? (y3 - y1) / (x3 - x1) : (y2 - y1) / (x2 - x1);
+            
+            // Hermite basis
+            float t2 = t * t;
+            float t3 = t2 * t;
+            float h00 = 2.0f * t3 - 3.0f * t2 + 1.0f;
+            float h10 = t3 - 2.0f * t2 + t;
+            float h01 = -2.0f * t3 + 3.0f * t2;
+            float h11 = t3 - t2;
+            
+            return h00 * y1 + h10 * (x2 - x1) * m1 + h01 * y2 + h11 * (x2 - x1) * m2;
+        }
+    }
+    
+    return curve[size-1][1];
+}
+
+// ============================================================================
+// PRESET CURVE DATA
+// ============================================================================
+
+// NEUTRAL PRESET
+__CONSTANT__ float hueVsHue_NEUTRAL[][2] = {{0.0f, 0.0f}, {360.0f, 0.0f}};
+__CONSTANT__ float hueVsSat_NEUTRAL[][2] = {{0.0f, 1.0f}, {360.0f, 1.0f}};
+__CONSTANT__ float hueVsLum_NEUTRAL[][2] = {{0.0f, 0.0f}, {360.0f, 0.0f}};
+__CONSTANT__ float satVsSat_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float satVsLum_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
+__CONSTANT__ float lumVsSat_NEUTRAL[][2] = {{0.0f, 1.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float lumVsLum_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float redCurve_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float greenCurve_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float blueCurve_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+
+// FUJI VELVIA PRESET
+__CONSTANT__ float hueVsHue_VELVIA[][2] = {
+    {0.0f, 5.0f}, {60.0f, 10.0f}, {120.0f, -5.0f}, {180.0f, 0.0f}, 
+    {240.0f, 5.0f}, {300.0f, 0.0f}, {360.0f, 5.0f}
+};
+__CONSTANT__ float hueVsSat_VELVIA[][2] = {
+    {0.0f, 1.15f}, {60.0f, 1.25f}, {120.0f, 1.35f}, {180.0f, 1.2f}, 
+    {240.0f, 1.3f}, {300.0f, 1.1f}, {360.0f, 1.15f}
+};
+__CONSTANT__ float hueVsLum_VELVIA[][2] = {
+    {0.0f, 0.0f}, {60.0f, 0.03f}, {120.0f, 0.0f}, {180.0f, -0.02f}, 
+    {240.0f, -0.02f}, {300.0f, 0.0f}, {360.0f, 0.0f}
+};
+__CONSTANT__ float satVsSat_VELVIA[][2] = {
+    {0.0f, 0.0f}, {0.3f, 0.32f}, {0.6f, 0.65f}, {0.85f, 0.88f}, {1.0f, 0.95f}
+};
+__CONSTANT__ float satVsLum_VELVIA[][2] = {
+    {0.0f, 0.0f}, {0.5f, -0.01f}, {1.0f, -0.03f}
+};
+__CONSTANT__ float lumVsSat_VELVIA[][2] = {
+    {0.0f, 0.8f}, {0.2f, 1.0f}, {0.5f, 1.1f}, {0.8f, 1.05f}, {1.0f, 0.95f}
+};
+__CONSTANT__ float lumVsLum_VELVIA[][2] = {
+    {0.0f, 0.0f}, {0.15f, 0.18f}, {0.35f, 0.38f}, {0.5f, 0.5f}, 
+    {0.7f, 0.68f}, {0.88f, 0.88f}, {1.0f, 1.0f}
+};
+__CONSTANT__ float redCurve_VELVIA[][2] = {{0.0f, 0.0f}, {0.5f, 0.52f}, {1.0f, 1.0f}};
+__CONSTANT__ float greenCurve_VELVIA[][2] = {{0.0f, 0.0f}, {0.5f, 0.49f}, {1.0f, 0.99f}};
+__CONSTANT__ float blueCurve_VELVIA[][2] = {{0.0f, 0.0f}, {0.5f, 0.50f}, {1.0f, 1.0f}};
+
+// KODAK PORTRA PRESET
+__CONSTANT__ float hueVsHue_PORTRA[][2] = {
+    {0.0f, -2.0f}, {30.0f, 3.0f}, {60.0f, 3.0f}, {120.0f, 0.0f}, 
+    {180.0f, -3.0f}, {240.0f, -3.0f}, {300.0f, 0.0f}, {360.0f, -2.0f}
+};
+__CONSTANT__ float hueVsSat_PORTRA[][2] = {
+    {0.0f, 0.95f}, {30.0f, 1.0f}, {60.0f, 0.98f}, {120.0f, 0.9f}, 
+    {180.0f, 0.93f}, {240.0f, 0.9f}, {300.0f, 0.95f}, {360.0f, 0.95f}
+};
+__CONSTANT__ float hueVsLum_PORTRA[][2] = {
+    {0.0f, 0.0f}, {30.0f, 0.02f}, {60.0f, 0.015f}, {120.0f, 0.0f}, 
+    {180.0f, 0.0f}, {240.0f, 0.0f}, {300.0f, 0.0f}, {360.0f, 0.0f}
+};
+__CONSTANT__ float satVsSat_PORTRA[][2] = {
+    {0.0f, 0.0f}, {0.4f, 0.38f}, {0.7f, 0.68f}, {1.0f, 0.92f}
+};
+__CONSTANT__ float satVsLum_PORTRA[][2] = {
+    {0.0f, 0.0f}, {0.5f, -0.005f}, {1.0f, -0.015f}
+};
+__CONSTANT__ float lumVsSat_PORTRA[][2] = {
+    {0.0f, 0.7f}, {0.2f, 0.9f}, {0.5f, 1.0f}, {0.8f, 0.98f}, {1.0f, 0.85f}
+};
+__CONSTANT__ float lumVsLum_PORTRA[][2] = {
+    {0.0f, 0.01f}, {0.15f, 0.16f}, {0.35f, 0.36f}, {0.5f, 0.5f}, 
+    {0.7f, 0.71f}, {0.88f, 0.91f}, {1.0f, 0.99f}
+};
+__CONSTANT__ float redCurve_PORTRA[][2] = {{0.0f, 0.0f}, {0.5f, 0.49f}, {1.0f, 0.99f}};
+__CONSTANT__ float greenCurve_PORTRA[][2] = {{0.0f, 0.01f}, {0.5f, 0.50f}, {1.0f, 1.0f}};
+__CONSTANT__ float blueCurve_PORTRA[][2] = {{0.0f, 0.0f}, {0.5f, 0.51f}, {1.0f, 1.0f}};
+
+// ============================================================================
+// ORGANIC HIGHLIGHT/SHADOW DESATURATION
+// ============================================================================
+
+__DEVICE__ float organic_lum_desat(float luminance, float shadow_desat, float highlight_desat) {
+    // Smooth desaturation in shadows and highlights (film behavior)
+    // Uses smooth curves instead of hard thresholds
+    
+    // Shadow desaturation (0.0 - 0.3 range, smooth falloff)
+    float shadow_factor = 1.0f;
+    if (luminance < 0.3f) {
+        float t = luminance / 0.3f;
+        // Smooth cubic easing
+        float shadow_curve = t * t * (3.0f - 2.0f * t);
+        shadow_factor = 1.0f - shadow_desat * (1.0f - shadow_curve);
+    }
+    
+    // Highlight desaturation (0.7 - 1.0 range, smooth falloff)
+    float highlight_factor = 1.0f;
+    if (luminance > 0.7f) {
+        float t = (luminance - 0.7f) / 0.3f;
+        // Smooth cubic easing
+        float highlight_curve = t * t * (3.0f - 2.0f * t);
+        highlight_factor = 1.0f - highlight_desat * highlight_curve;
+    }
+    
+    // Combine both factors (multiply for smooth transition)
+    return shadow_factor * highlight_factor;
+}
+
+__DEVICE__ float3 rgb_to_hsv(float3 rgb) {
+    float r = rgb.x;
+    float g = rgb.y;
+    float b = rgb.z;
+    
+    float cmax = _fmaxf(r, _fmaxf(g, b));
+    float cmin = _fminf(r, _fminf(g, b));
+    float delta = cmax - cmin;
+    
+    float h = 0.0f;
+    if (delta > 0.0f) {
+        if (cmax == r) {
+            h = 60.0f * fmod_positive((g - b) / delta, 6.0f);
+        } else if (cmax == g) {
+            h = 60.0f * (((b - r) / delta) + 2.0f);
+        } else {
+            h = 60.0f * (((r - g) / delta) + 4.0f);
+        }
+    }
+    
+    float s = (cmax == 0.0f) ? 0.0f : delta / cmax;
+    float v = cmax;
+    
+    return make_float3(h, s, v);
+}
+
+// ============================================================================
+// HSV TO RGB
+// ============================================================================
+
+__DEVICE__ float3 hsv_to_rgb(float3 hsv) {
+    float h = hsv.x;
+    float s = hsv.y;
+    float v = hsv.z;
+    
+    float c = v * s;
+    float x = c * (1.0f - _fabs(fmod_positive(h / 60.0f, 2.0f) - 1.0f));
+    float m = v - c;
+    
+    float r, g, b;
+    
+    if (h >= 0.0f && h < 60.0f) {
+        r = c; g = x; b = 0.0f;
+    } else if (h >= 60.0f && h < 120.0f) {
+        r = x; g = c; b = 0.0f;
+    } else if (h >= 120.0f && h < 180.0f) {
+        r = 0.0f; g = c; b = x;
+    } else if (h >= 180.0f && h < 240.0f) {
+        r = 0.0f; g = x; b = c;
+    } else if (h >= 240.0f && h < 300.0f) {
+        r = x; g = 0.0f; b = c;
+    } else {
+        r = c; g = 0.0f; b = x;
+    }
+    
+    return make_float3(r + m, g + m, b + m);
+}
+
+// ============================================================================
+// MAIN TRANSFORM
+// ============================================================================
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, float p_B) {
+    float3 rgb = make_float3(p_R, p_G, p_B);
+    
+    // Select preset curves and parameters using pointers
+    const float (*hueVsHue)[2];
+    const float (*hueVsSat)[2];
+    const float (*hueVsLum)[2];
+    const float (*satVsSat)[2];
+    const float (*satVsLum)[2];
+    const float (*lumVsSat)[2];
+    const float (*lumVsLum)[2];
+    const float (*redCurve)[2];
+    const float (*greenCurve)[2];
+    const float (*blueCurve)[2];
+    
+    int size_hueVsHue, size_hueVsSat, size_hueVsLum;
+    int size_satVsSat, size_satVsLum, size_lumVsSat, size_lumVsLum;
+    int size_redCurve, size_greenCurve, size_blueCurve;
+    
+    float preset_saturation = 1.0f;
+    float preset_contrast = 1.0f;
+    
+    if (preset == 0) { // NEUTRAL
+        hueVsHue = hueVsHue_NEUTRAL; size_hueVsHue = 2;
+        hueVsSat = hueVsSat_NEUTRAL; size_hueVsSat = 2;
+        hueVsLum = hueVsLum_NEUTRAL; size_hueVsLum = 2;
+        satVsSat = satVsSat_NEUTRAL; size_satVsSat = 2;
+        satVsLum = satVsLum_NEUTRAL; size_satVsLum = 2;
+        lumVsSat = lumVsSat_NEUTRAL; size_lumVsSat = 2;
+        lumVsLum = lumVsLum_NEUTRAL; size_lumVsLum = 2;
+        redCurve = redCurve_NEUTRAL; size_redCurve = 2;
+        greenCurve = greenCurve_NEUTRAL; size_greenCurve = 2;
+        blueCurve = blueCurve_NEUTRAL; size_blueCurve = 2;
+    } else if (preset == 1) { // VELVIA
+        hueVsHue = hueVsHue_VELVIA; size_hueVsHue = 7;
+        hueVsSat = hueVsSat_VELVIA; size_hueVsSat = 7;
+        hueVsLum = hueVsLum_VELVIA; size_hueVsLum = 7;
+        satVsSat = satVsSat_VELVIA; size_satVsSat = 5;
+        satVsLum = satVsLum_VELVIA; size_satVsLum = 3;
+        lumVsSat = lumVsSat_VELVIA; size_lumVsSat = 5;
+        lumVsLum = lumVsLum_VELVIA; size_lumVsLum = 7;
+        redCurve = redCurve_VELVIA; size_redCurve = 3;
+        greenCurve = greenCurve_VELVIA; size_greenCurve = 3;
+        blueCurve = blueCurve_VELVIA; size_blueCurve = 3;
+        preset_saturation = 1.08f;
+        preset_contrast = 1.12f;
+    } else { // PORTRA
+        hueVsHue = hueVsHue_PORTRA; size_hueVsHue = 8;
+        hueVsSat = hueVsSat_PORTRA; size_hueVsSat = 8;
+        hueVsLum = hueVsLum_PORTRA; size_hueVsLum = 8;
+        satVsSat = satVsSat_PORTRA; size_satVsSat = 4;
+        satVsLum = satVsLum_PORTRA; size_satVsLum = 3;
+        lumVsSat = lumVsSat_PORTRA; size_lumVsSat = 5;
+        lumVsLum = lumVsLum_PORTRA; size_lumVsLum = 7;
+        redCurve = redCurve_PORTRA; size_redCurve = 3;
+        greenCurve = greenCurve_PORTRA; size_greenCurve = 3;
+        blueCurve = blueCurve_PORTRA; size_blueCurve = 3;
+        preset_saturation = 0.95f;
+        preset_contrast = 0.98f;
+    }
+    
+    // Combine preset and user parameters
+    float final_saturation = global_saturation * preset_saturation;
+    float final_contrast = global_contrast * preset_contrast;
+    
+    // Convert to HSV
+    float3 hsv = rgb_to_hsv(rgb);
+    float h = hsv.x;
+    float s = hsv.y;
+    float v = hsv.z;
+    
+    // ========================================================================
+    // TRANSFORM PIPELINE (7 curves)
+    // ========================================================================
+    
+    // 1. Hue → Hue shift
+    float hue_shift = cubic_spline_interpolate(h, hueVsHue, size_hueVsHue);
+    h = fmod_positive(h + hue_shift, 360.0f);
+    
+    // 2. Hue → Saturation
+    float sat_mult_hue = cubic_spline_interpolate(h, hueVsSat, size_hueVsSat);
+    s = clamp(s * sat_mult_hue, 0.0f, 1.0f);
+    
+    // 3. Hue → Luminance
+    float lum_offset_hue = cubic_spline_interpolate(h, hueVsLum, size_hueVsLum);
+    v = clamp(v + lum_offset_hue, 0.0f, 1.0f);
+    
+    // 4. Saturation → Saturation (non-linear)
+    float sat_mapped = cubic_spline_interpolate(s, satVsSat, size_satVsSat);
+    s = clamp(sat_mapped, 0.0f, 1.0f);
+    
+    // 5. Saturation → Luminance (NEW: film density)
+    float lum_offset_sat = cubic_spline_interpolate(s, satVsLum, size_satVsLum);
+    v = clamp(v + lum_offset_sat, 0.0f, 1.0f);
+    
+    // 6. Luminance → Saturation
+    float sat_mult_lum = cubic_spline_interpolate(v, lumVsSat, size_lumVsSat);
+    s = clamp(s * sat_mult_lum, 0.0f, 1.0f);
+    
+    // Apply organic highlight/shadow desaturation (BEFORE global saturation)
+    // This happens at the "film density" stage, so it's more natural
+    float desat_factor = organic_lum_desat(v, shadow_desat, highlight_desat);
+    s = clamp(s * desat_factor, 0.0f, 1.0f);
+    
+    // Apply global saturation (after all curve-based saturation adjustments)
+    s = clamp(s * final_saturation, 0.0f, 1.0f);
+    
+    // 7. Luminance → Luminance (tone curve)
+    v = cubic_spline_interpolate(v, lumVsLum, size_lumVsLum);
+    
+    // Apply contrast around midpoint
+    v = 0.5f + (v - 0.5f) * final_contrast;
+    
+    // Apply exposure
+    v = clamp(v * global_exposure, 0.0f, 1.0f);
+    
+    // Convert back to RGB
+    float3 rgb_out = hsv_to_rgb(make_float3(h, s, v));
+    
+    // Per-channel curves (simulate film dye layers)
+    rgb_out.x = cubic_spline_interpolate(rgb_out.x, redCurve, size_redCurve);
+    rgb_out.y = cubic_spline_interpolate(rgb_out.y, greenCurve, size_greenCurve);
+    rgb_out.z = cubic_spline_interpolate(rgb_out.z, blueCurve, size_blueCurve);
+    
+    // Final safety clamp
+    rgb_out.x = clamp(rgb_out.x, 0.0f, 1.0f);
+    rgb_out.y = clamp(rgb_out.y, 0.0f, 1.0f);
+    rgb_out.z = clamp(rgb_out.z, 0.0f, 1.0f);
+    
+    return rgb_out;
+}
