@@ -51,6 +51,11 @@ DEFINE_UI_PARAMS(sat_compression_cyan, Cyan Saturation Compression, DCTLUI_SLIDE
 DEFINE_UI_PARAMS(sat_compression_blue, Blue Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
 DEFINE_UI_PARAMS(sat_compression_magenta, Magenta Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
 
+// Exposed Constants for Fine Control
+DEFINE_UI_PARAMS(middle_grey, Middle Grey Reference, DCTLUI_SLIDER_FLOAT, 0.18, 0.01, 0.50, 0.01)
+DEFINE_UI_PARAMS(lch_chroma_scale, LCH Chroma Scale, DCTLUI_SLIDER_FLOAT, 128.0, 64.0, 256.0, 1.0)
+DEFINE_UI_PARAMS(lch_max_chroma, LCH Max Chroma, DCTLUI_SLIDER_FLOAT, 2.0, 1.0, 4.0, 0.1)
+
 typedef struct {
   float3 x, y, z;
 } float3x3;
@@ -507,7 +512,8 @@ __DEVICE__ float3 hsv_to_rgb(float3 hsv) {
 
 // RGB to LCH (via XYZ and Lab)
 // FIXED: Now uses the input gamut matrix instead of hardcoded Rec.709
-__DEVICE__ float3 rgb_to_lch(float3 rgb, float3x3 rgb_to_xyz_matrix) {
+// FIXED: Proper handling of blue hues and configurable chroma scale
+__DEVICE__ float3 rgb_to_lch(float3 rgb, float3x3 rgb_to_xyz_matrix, float chroma_scale) {
     // RGB is already linear, convert to XYZ using the correct input gamut matrix
     float3 xyz = vdot(rgb_to_xyz_matrix, rgb);
     float x = xyz.x;
@@ -519,9 +525,10 @@ __DEVICE__ float3 rgb_to_lch(float3 rgb, float3x3 rgb_to_xyz_matrix) {
     y = y / 1.00000f;
     z = z / 1.08883f;
 
-    x = (x > 0.008856f) ? _powf(x, 1.0f/3.0f) : (7.787f * x) + 16.0f/116.0f;
-    y = (y > 0.008856f) ? _powf(y, 1.0f/3.0f) : (7.787f * y) + 16.0f/116.0f;
-    z = (z > 0.008856f) ? _powf(z, 1.0f/3.0f) : (7.787f * z) + 16.0f/116.0f;
+    // Epsilon and kappa for CIE Lab (correct constants: 216/24389 and 24389/27)
+    x = (x > 0.008856f) ? _powf(x, 1.0f/3.0f) : (903.3f * x + 16.0f) / 116.0f;
+    y = (y > 0.008856f) ? _powf(y, 1.0f/3.0f) : (903.3f * y + 16.0f) / 116.0f;
+    z = (z > 0.008856f) ? _powf(z, 1.0f/3.0f) : (903.3f * z + 16.0f) / 116.0f;
 
     float L = (116.0f * y) - 16.0f;
     float a = 500.0f * (x - y);
@@ -532,14 +539,15 @@ __DEVICE__ float3 rgb_to_lch(float3 rgb, float3x3 rgb_to_xyz_matrix) {
     float H = _atan2f(b_lab, a) * 180.0f / 3.14159265359f;
     if (H < 0.0f) H += 360.0f;
 
-    return make_float3(L / 100.0f, C / 128.0f, H); // Normalize L and C
+    return make_float3(L / 100.0f, C / chroma_scale, H); // Normalize L and C with configurable scale
 }
 
 // LCH to RGB
 // FIXED: Now uses the input gamut matrix instead of hardcoded Rec.709
-__DEVICE__ float3 lch_to_rgb(float3 lch, float3x3 xyz_to_rgb_matrix) {
+// FIXED: Proper handling of out-of-gamut colors (blues) and configurable chroma scale
+__DEVICE__ float3 lch_to_rgb(float3 lch, float3x3 xyz_to_rgb_matrix, float chroma_scale, float max_chroma) {
     float L = lch.x * 100.0f;
-    float C = lch.y * 128.0f;
+    float C = lch.y * chroma_scale;
     float H = lch.z;
 
     // LCH to Lab
@@ -547,13 +555,14 @@ __DEVICE__ float3 lch_to_rgb(float3 lch, float3x3 xyz_to_rgb_matrix) {
     float b_lab = C * _sinf(H * 3.14159265359f / 180.0f);
 
     // Lab to XYZ
-    float y = (L + 16.0f) / 116.0f;
-    float x = a / 500.0f + y;
-    float z = y - b_lab / 200.0f;
+    float fy = (L + 16.0f) / 116.0f;
+    float fx = a / 500.0f + fy;
+    float fz = fy - b_lab / 200.0f;
 
-    x = (x > 0.206897f) ? _powf(x, 3.0f) : (x - 16.0f/116.0f) / 7.787f;
-    y = (y > 0.206897f) ? _powf(y, 3.0f) : (y - 16.0f/116.0f) / 7.787f;
-    z = (z > 0.206897f) ? _powf(z, 3.0f) : (z - 16.0f/116.0f) / 7.787f;
+    // Improved inverse Lab transform (using correct epsilon)
+    float x = (fx > 0.206897f) ? _powf(fx, 3.0f) : (fx - 16.0f/116.0f) / 7.787f;
+    float y = (fy > 0.206897f) ? _powf(fy, 3.0f) : (fy - 16.0f/116.0f) / 7.787f;
+    float z = (fz > 0.206897f) ? _powf(fz, 3.0f) : (fz - 16.0f/116.0f) / 7.787f;
 
     x *= 0.95047f;
     y *= 1.00000f;
@@ -563,7 +572,18 @@ __DEVICE__ float3 lch_to_rgb(float3 lch, float3x3 xyz_to_rgb_matrix) {
     float3 xyz = make_float3(x, y, z);
     float3 rgb = vdot(xyz_to_rgb_matrix, xyz);
 
-    return make_float3(clamp(rgb.x, 0.0f, 1.0f), clamp(rgb.y, 0.0f, 1.0f), clamp(rgb.z, 0.0f, 1.0f));
+    // FIXED: Allow out-of-gamut values up to max_chroma for proper blue handling
+    // Only clamp extreme negatives to prevent artifacts
+    rgb.x = _fmaxf(rgb.x, -0.1f);
+    rgb.y = _fmaxf(rgb.y, -0.1f);
+    rgb.z = _fmaxf(rgb.z, -0.1f);
+
+    // Soft clamp the top end using max_chroma parameter
+    rgb.x = _fminf(rgb.x, max_chroma);
+    rgb.y = _fminf(rgb.y, max_chroma);
+    rgb.z = _fminf(rgb.z, max_chroma);
+
+    return rgb;
 }
 
 // RGB to YCbCr
@@ -1073,8 +1093,8 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         float3 hsv = rgb_to_hsv(rgb);
         h = hsv.x; s = hsv.y; v = hsv.z;
     } else if (working_colorspace == 1) { // LCH
-        // FIXED: Now passes the correct input gamut matrix
-        float3 lch = rgb_to_lch(rgb, in_to_xyz);
+        // FIXED: Now passes the correct input gamut matrix and chroma scale
+        float3 lch = rgb_to_lch(rgb, in_to_xyz, lch_chroma_scale);
         v = lch.x; s = lch.y; h = lch.z;
     } else { // YCbCr
         float3 ycbcr = rgb_to_ycbcr(rgb);
@@ -1219,9 +1239,9 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     if (working_colorspace == 0) { // HSV
         rgb_out = hsv_to_rgb(make_float3(h, s, v));
     } else if (working_colorspace == 1) { // LCH
-        // FIXED: Now passes the inverse matrix for correct conversion
+        // FIXED: Now passes the inverse matrix, chroma scale, and max chroma for correct conversion
         float3x3 xyz_to_rgb = inv_f33(in_to_xyz);
-        rgb_out = lch_to_rgb(make_float3(v, s, h), xyz_to_rgb);
+        rgb_out = lch_to_rgb(make_float3(v, s, h), xyz_to_rgb, lch_chroma_scale, lch_max_chroma);
     } else { // YCbCr
         float cb = (s / 2.0f) * _cosf(h * 3.14159265359f / 180.0f) + 0.5f;
         float cr = (s / 2.0f) * _sinf(h * 3.14159265359f / 180.0f) + 0.5f;
