@@ -1,3 +1,4 @@
+#line 2 // Fix line numbers in resolve/logs/rollinglog.txt
 // ============================================================================
 // FILM EMULATION DCTL - COMPLETE SYSTEM
 // ============================================================================
@@ -55,6 +56,7 @@ DEFINE_UI_PARAMS(sat_compression_magenta, Magenta Saturation Compression, DCTLUI
 DEFINE_UI_PARAMS(middle_grey, Middle Grey Reference, DCTLUI_SLIDER_FLOAT, 0.18, 0.01, 0.50, 0.01)
 DEFINE_UI_PARAMS(lch_chroma_scale, LCH Chroma Scale, DCTLUI_SLIDER_FLOAT, 128.0, 64.0, 256.0, 1.0)
 DEFINE_UI_PARAMS(lch_max_chroma, LCH Max Chroma, DCTLUI_SLIDER_FLOAT, 2.0, 1.0, 4.0, 0.1)
+DEFINE_UI_PARAMS(gamut_compression, Gamut Compression Strength, DCTLUI_SLIDER_FLOAT, 0.8, 0.0, 1.0, 0.01)
 
 typedef struct {
   float3 x, y, z;
@@ -192,6 +194,53 @@ __DEVICE__ float gauss_window(float hue, float center, float width) {
     if (diff > 180.0f) diff -= 360.0f;
     if (diff < -180.0f) diff += 360.0f;
     return _expf(-(diff * diff) / (2.0f * width * width));
+}
+
+// Gamut compression function for out-of-gamut RGB values
+// Handles negative values by shifting entire RGB triplet proportionally
+// Uses soft-knee compression for values > 1.0 to preserve hue
+__DEVICE__ float3 compress_gamut(float3 rgb, float strength, float max_val) {
+    // Find min and max of RGB
+    float rgb_min = _fminf(rgb.x, _fminf(rgb.y, rgb.z));
+    float rgb_max = _fmaxf(rgb.x, _fmaxf(rgb.y, rgb.z));
+
+    // If we have negative values, shift the entire RGB triplet up
+    if (rgb_min < 0.0f && strength > 0.0f) {
+        // Calculate how much to shift (proportional to strength)
+        float shift = -rgb_min * strength;
+        rgb.x += shift;
+        rgb.y += shift;
+        rgb.z += shift;
+
+        // Recalculate max after shift
+        rgb_max = _fmaxf(rgb.x, _fmaxf(rgb.y, rgb.z));
+    }
+
+    // Soft-knee compression for values above 1.0
+    // This preserves hue while compressing luminance
+    if (rgb_max > 1.0f && strength > 0.0f) {
+        // Use a hyperbolic compression curve
+        // Values 1.0-max_val are compressed into 1.0-1.0+margin
+        float margin = 0.2f; // How much headroom above 1.0 to allow
+        float threshold = 1.0f;
+
+        // Calculate compression ratio
+        float excess = rgb_max - threshold;
+        float compressed_excess = excess / (1.0f + excess / margin);
+        float scale = (threshold + compressed_excess * strength + excess * (1.0f - strength)) / rgb_max;
+
+        // Scale all channels proportionally to preserve hue
+        rgb.x *= scale;
+        rgb.y *= scale;
+        rgb.z *= scale;
+    }
+
+    // Final safety clamp (should rarely trigger with good compression)
+    rgb.x = clamp(rgb.x, 0.0f, max_val);
+    rgb.y = clamp(rgb.y, 0.0f, max_val);
+    rgb.z = clamp(rgb.z, 0.0f, max_val);
+
+    return rgb;
 }
 
 // Matrix 3x3 inversion function
@@ -544,8 +593,8 @@ __DEVICE__ float3 rgb_to_lch(float3 rgb, float3x3 rgb_to_xyz_matrix, float chrom
 
 // LCH to RGB
 // FIXED: Now uses the input gamut matrix instead of hardcoded Rec.709
-// FIXED: Proper handling of out-of-gamut colors (blues) and configurable chroma scale
-__DEVICE__ float3 lch_to_rgb(float3 lch, float3x3 xyz_to_rgb_matrix, float chroma_scale, float max_chroma) {
+// FIXED: Uses intelligent gamut compression instead of hard clipping
+__DEVICE__ float3 lch_to_rgb(float3 lch, float3x3 xyz_to_rgb_matrix, float chroma_scale, float max_chroma, float compression_strength) {
     float L = lch.x * 100.0f;
     float C = lch.y * chroma_scale;
     float H = lch.z;
@@ -572,16 +621,9 @@ __DEVICE__ float3 lch_to_rgb(float3 lch, float3x3 xyz_to_rgb_matrix, float chrom
     float3 xyz = make_float3(x, y, z);
     float3 rgb = vdot(xyz_to_rgb_matrix, xyz);
 
-    // FIXED: Allow out-of-gamut values up to max_chroma for proper blue handling
-    // Only clamp extreme negatives to prevent artifacts
-    rgb.x = _fmaxf(rgb.x, -0.1f);
-    rgb.y = _fmaxf(rgb.y, -0.1f);
-    rgb.z = _fmaxf(rgb.z, -0.1f);
-
-    // Soft clamp the top end using max_chroma parameter
-    rgb.x = _fminf(rgb.x, max_chroma);
-    rgb.y = _fminf(rgb.y, max_chroma);
-    rgb.z = _fminf(rgb.z, max_chroma);
+    // NEW: Apply intelligent gamut compression instead of hard clipping
+    // This preserves hue and prevents saturated colors from going dark
+    rgb = compress_gamut(rgb, compression_strength, max_chroma);
 
     return rgb;
 }
@@ -1239,9 +1281,9 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     if (working_colorspace == 0) { // HSV
         rgb_out = hsv_to_rgb(make_float3(h, s, v));
     } else if (working_colorspace == 1) { // LCH
-        // FIXED: Now passes the inverse matrix, chroma scale, and max chroma for correct conversion
+        // FIXED: Now passes the inverse matrix, chroma scale, max chroma, and gamut compression
         float3x3 xyz_to_rgb = inv_f33(in_to_xyz);
-        rgb_out = lch_to_rgb(make_float3(v, s, h), xyz_to_rgb, lch_chroma_scale, lch_max_chroma);
+        rgb_out = lch_to_rgb(make_float3(v, s, h), xyz_to_rgb, lch_chroma_scale, lch_max_chroma, gamut_compression);
     } else { // YCbCr
         float cb = (s / 2.0f) * _cosf(h * 3.14159265359f / 180.0f) + 0.5f;
         float cr = (s / 2.0f) * _sinf(h * 3.14159265359f / 180.0f) + 0.5f;
