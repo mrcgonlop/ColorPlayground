@@ -59,6 +59,24 @@ DEFINE_UI_PARAMS(gamut_compress_r, Gamut Compress Red, DCTLUI_SLIDER_FLOAT, 0.03
 DEFINE_UI_PARAMS(gamut_compress_g, Gamut Compress Green, DCTLUI_SLIDER_FLOAT, 0.03, 0.01, 0.15, 0.01)
 DEFINE_UI_PARAMS(gamut_compress_b, Gamut Compress Blue, DCTLUI_SLIDER_FLOAT, 0.03, 0.01, 0.15, 0.01)
 
+// Overall RGB Hue Rotation (JP_2499 style)
+DEFINE_UI_PARAMS(enable_overall_hue, Enable Overall Hue Rotation, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(overall_hue_r, Overall Hue R, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(overall_hue_g, Overall Hue G, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(overall_hue_b, Overall Hue B, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+
+// Per-Hue-Zone Sat->Hue (Cyan, Magenta, Yellow zones)
+DEFINE_UI_PARAMS(enable_hue_zone_sat, Enable Hue-Zone Sat-Hue, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(sat_hue_cyan, Sat-Hue Cyan deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
+DEFINE_UI_PARAMS(sat_hue_magenta, Sat-Hue Magenta deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
+DEFINE_UI_PARAMS(sat_hue_yellow, Sat-Hue Yellow deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
+
+// Per-Hue-Zone Lum->Hue (Cyan, Magenta, Yellow zones)
+DEFINE_UI_PARAMS(enable_hue_zone_lum, Enable Hue-Zone Lum-Hue, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(lum_hue_cyan, Lum-Hue Cyan deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
+DEFINE_UI_PARAMS(lum_hue_magenta, Lum-Hue Magenta deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
+DEFINE_UI_PARAMS(lum_hue_yellow, Lum-Hue Yellow deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
+
 // ============================================================================
 // MATRIX DEFINITIONS & HELPER FUNCTIONS
 // ============================================================================
@@ -316,6 +334,24 @@ __DEVICE__ inline float3x3 crosstalkMatrix(float rg, float rb, float gr, float g
     return make_float3x3(redcoeff, greencoeff, bluecoeff);
 }
 
+// Simple hue matrix (JP_2499 overall hue rotation)
+__DEVICE__ inline float3x3 simpleHueMatrix(float red, float green, float blue) {
+    float3 redcoeff = make_float3(1.0f, green > 0.0f ? green : 0.0f, blue < 0.0f ? -blue : 0.0f);
+    float3 greencoeff = make_float3(red > 0.0f ? red : 0.0f, 1.0f, blue > 0.0f ? blue : 0.0f);
+    float3 bluecoeff = make_float3(red < 0.0f ? -red : 0.0f, green < 0.0f ? -green : 0.0f, 1.0f);
+
+    float3 white;
+    white.x = 1.0f + redcoeff.y + redcoeff.z;
+    white.y = greencoeff.x + 1.0f + greencoeff.z;
+    white.z = bluecoeff.x + bluecoeff.y + 1.0f;
+
+    redcoeff = redcoeff / white.x;
+    greencoeff = greencoeff / white.y;
+    bluecoeff = bluecoeff / white.z;
+
+    return make_float3x3(redcoeff, greencoeff, bluecoeff);
+}
+
 // ============================================================================
 // OPPONENT COLOR SPACE (from OpenDRT)
 // ============================================================================
@@ -384,6 +420,53 @@ __DEVICE__ inline float2 rotate_hue(float2 opp, float rotation) {
         radius * _cosf(hue),
         radius * _sinf(hue)
     );
+}
+
+// Get hue zone weights for Cyan, Magenta, Yellow (film negative primaries)
+__DEVICE__ inline float3 get_hue_zone_weights(float2 opp) {
+    const float PI = 3.14159265359f;
+
+    // Get hue angle in radians (-PI to PI)
+    float hue = _atan2f(opp.y, opp.x);
+
+    // Convert to 0-360 degrees for easier understanding
+    float hue_deg = hue * 180.0f / PI;
+    if (hue_deg < 0.0f) hue_deg += 360.0f;
+
+    // Film negative primaries (subtractive colors):
+    // Cyan: ~180° (opposite of Red)
+    // Magenta: ~300° (opposite of Green)
+    // Yellow: ~60° (opposite of Blue)
+
+    float cyan_center = 180.0f;
+    float magenta_center = 300.0f;
+    float yellow_center = 60.0f;
+
+    // Calculate distance to each center (with wraparound)
+    float dist_cyan = _fabs(hue_deg - cyan_center);
+    if (dist_cyan > 180.0f) dist_cyan = 360.0f - dist_cyan;
+
+    float dist_magenta = _fabs(hue_deg - magenta_center);
+    if (dist_magenta > 180.0f) dist_magenta = 360.0f - dist_magenta;
+
+    float dist_yellow = _fabs(hue_deg - yellow_center);
+    if (dist_yellow > 180.0f) dist_yellow = 360.0f - dist_yellow;
+
+    // Convert distances to weights (closer = higher weight)
+    // Using smooth falloff over 120 degree zones
+    float weight_cyan = _fmaxf(0.0f, 1.0f - dist_cyan / 60.0f);
+    float weight_magenta = _fmaxf(0.0f, 1.0f - dist_magenta / 60.0f);
+    float weight_yellow = _fmaxf(0.0f, 1.0f - dist_yellow / 60.0f);
+
+    // Normalize so weights sum to 1 (if any weight exists)
+    float total = weight_cyan + weight_magenta + weight_yellow;
+    if (total > 0.001f) {
+        weight_cyan /= total;
+        weight_magenta /= total;
+        weight_yellow /= total;
+    }
+
+    return make_float3(weight_cyan, weight_magenta, weight_yellow);
 }
 
 // ============================================================================
@@ -516,6 +599,16 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     }
 
     // ========================================================================
+    // 4c. OVERALL RGB HUE ROTATION (JP_2499 style)
+    // ========================================================================
+    if (enable_overall_hue) {
+        float3 rgb_copy = rgb;
+        float3x3 hue_matrix = simpleHueMatrix(overall_hue_r, overall_hue_g, overall_hue_b);
+        rgb = vdot(hue_matrix, rgb);
+        rgb = EnergyCorrection(rgb_copy, rgb, matrix_rec709_to_xyz);
+    }
+
+    // ========================================================================
     // 5. OPPONENT SPACE HUE OPERATIONS
     // ========================================================================
 
@@ -526,25 +619,41 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     // Calculate saturation (achromatic distance)
     float sat = achromatic_distance(opp);
 
-    // SAT→HUE: Hue rotation based on saturation
-    if (enable_sat_to_hue && sat > 0.001f) {
-        float hue_shift_deg = cubic_spline_interpolate(sat, sat_to_hue, sat_to_hue_size);
+    // Get hue zone weights (CMY - film negative primaries)
+    float3 hue_weights = get_hue_zone_weights(opp);
+
+    // SAT→HUE: Hue rotation based on saturation (global curve + per-hue-zone)
+    if ((enable_sat_to_hue || enable_hue_zone_sat) && sat > 0.001f) {
+        float hue_shift_deg = 0.0f;
+
+        // Global curve contribution
+        if (enable_sat_to_hue) {
+            hue_shift_deg += cubic_spline_interpolate(sat, sat_to_hue, sat_to_hue_size);
+        }
+
+        // Per-hue-zone contribution (weighted by CMY zones)
+        if (enable_hue_zone_sat) {
+            hue_shift_deg += hue_weights.x * sat_hue_cyan +
+                             hue_weights.y * sat_hue_magenta +
+                             hue_weights.z * sat_hue_yellow;
+        }
+
         if (_fabs(hue_shift_deg) > 0.01f) {
             const float DEG_TO_RAD = 3.14159265359f / 180.0f;
             opp = rotate_hue(opp, hue_shift_deg * DEG_TO_RAD);
         }
     }
 
-    // LUM→HUE: Hue rotation based on luminance (curve + tripartite sliders)
-    if ((enable_lum_to_hue || _fabs(shadow_hue_shift) > 0.01f || _fabs(midtone_hue_shift) > 0.01f || _fabs(highlight_hue_shift) > 0.01f) && sat > 0.001f) {
+    // LUM→HUE: Hue rotation based on luminance (curve + tripartite + per-hue-zone)
+    if ((enable_lum_to_hue || enable_hue_zone_lum || _fabs(shadow_hue_shift) > 0.01f || _fabs(midtone_hue_shift) > 0.01f || _fabs(highlight_hue_shift) > 0.01f) && sat > 0.001f) {
         float hue_shift_deg = 0.0f;
 
-        // Add curve contribution
+        // Global curve contribution
         if (enable_lum_to_hue) {
             hue_shift_deg += cubic_spline_interpolate(lum, lum_to_hue, lum_to_hue_size);
         }
 
-        // Add tripartite slider contribution
+        // Tripartite slider contribution (shadow/midtone/highlight)
         // Smooth blending zones: shadow (0-0.18), midtone (0.18-0.5), highlight (0.5-1.0)
         if (lum < 0.18f) {
             // Shadow zone: full shadow shift, blend to midtone
@@ -559,6 +668,13 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         } else {
             // Highlight zone: full highlight shift
             hue_shift_deg += highlight_hue_shift;
+        }
+
+        // Per-hue-zone contribution (weighted by CMY zones)
+        if (enable_hue_zone_lum) {
+            hue_shift_deg += hue_weights.x * lum_hue_cyan +
+                             hue_weights.y * lum_hue_magenta +
+                             hue_weights.z * lum_hue_yellow;
         }
 
         if (_fabs(hue_shift_deg) > 0.01f) {
