@@ -44,13 +44,16 @@ DEFINE_UI_PARAMS(hue_loop_threshold_blue, Blue Loop Threshold, DCTLUI_SLIDER_FLO
 DEFINE_UI_PARAMS(hue_loop_threshold_magenta, Magenta Loop Threshold, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
 
 // Per-Hue Saturation Compression
-DEFINE_UI_PARAMS(enable_per_hue_sat_compression, Enable Per-Hue Saturation Compression, DCTLUI_CHECK_BOX, 0)
+// Values < 1.0 expand saturation range (more headroom), > 1.0 compress (earlier rolloff)
+// Defaults compensate for LCH color space's hue-dependent chroma limits
+// Presets override these with film-specific color behavior
+DEFINE_UI_PARAMS(enable_per_hue_sat_compression, Enable Per-Hue Saturation Compression, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(sat_compression_red, Red Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
-DEFINE_UI_PARAMS(sat_compression_yellow, Yellow Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(sat_compression_yellow, Yellow Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.1, 0.5, 1.5, 0.01)
 DEFINE_UI_PARAMS(sat_compression_green, Green Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
-DEFINE_UI_PARAMS(sat_compression_cyan, Cyan Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
-DEFINE_UI_PARAMS(sat_compression_blue, Blue Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
-DEFINE_UI_PARAMS(sat_compression_magenta, Magenta Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(sat_compression_cyan, Cyan Saturation Compression, DCTLUI_SLIDER_FLOAT, 0.75, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(sat_compression_blue, Blue Saturation Compression, DCTLUI_SLIDER_FLOAT, 0.85, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(sat_compression_magenta, Magenta Saturation Compression, DCTLUI_SLIDER_FLOAT, 0.95, 0.5, 1.5, 0.01)
 
 // Exposed Constants for Fine Control
 DEFINE_UI_PARAMS(middle_grey, Middle Grey Reference, DCTLUI_SLIDER_FLOAT, 0.18, 0.01, 0.50, 0.01)
@@ -1025,7 +1028,16 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     
     float preset_saturation = 1.0f;
     float preset_contrast = 1.0f;
-    
+
+    // Per-hue saturation compression factors for this preset
+    // These will override user sliders when preset is selected
+    float preset_sat_comp_red = 1.0f;
+    float preset_sat_comp_yellow = 1.1f;
+    float preset_sat_comp_green = 1.0f;
+    float preset_sat_comp_cyan = 0.75f;
+    float preset_sat_comp_blue = 0.85f;
+    float preset_sat_comp_magenta = 0.95f;
+
     if (preset == 0) { // NEUTRAL
         hueVsHue = hueVsHue_NEUTRAL; size_hueVsHue = 2;
         hueVsSat = hueVsSat_NEUTRAL; size_hueVsSat = 2;
@@ -1052,6 +1064,13 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         blueCurve = blueCurve_VELVIA; size_blueCurve = 3;
         preset_saturation = 1.08f;
         preset_contrast = 1.12f;
+        // Velvia: Explosive greens/yellows, controlled blues
+        preset_sat_comp_red = 0.95f;
+        preset_sat_comp_yellow = 0.70f;  // Expand yellow range
+        preset_sat_comp_green = 0.75f;   // Expand green range
+        preset_sat_comp_cyan = 0.70f;    // Expand cyan slightly
+        preset_sat_comp_blue = 1.15f;    // Compress blue (rolls off earlier)
+        preset_sat_comp_magenta = 1.0f;
     } else if (preset == 2) { // PORTRA
         hueVsHue = hueVsHue_PORTRA; size_hueVsHue = 8;
         hueVsSat = hueVsSat_PORTRA; size_hueVsSat = 8;
@@ -1066,6 +1085,13 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         blueCurve = blueCurve_PORTRA; size_blueCurve = 3;
         preset_saturation = 0.95f;
         preset_contrast = 0.98f;
+        // Portra: Gentle skin tones, controlled blues, subtle greens
+        preset_sat_comp_red = 0.85f;     // Expand reds (skin tones)
+        preset_sat_comp_yellow = 0.95f;  // Slightly expand yellows
+        preset_sat_comp_green = 1.05f;   // Compress greens (more subtle)
+        preset_sat_comp_cyan = 0.80f;    // Expand cyan
+        preset_sat_comp_blue = 1.20f;    // Strong blue compression (gentle rolloff)
+        preset_sat_comp_magenta = 1.0f;
     } else if (preset == 3) { // CINESTILL
         hueVsHue = hueVsHue_CINESTILL; size_hueVsHue = 7;
         hueVsSat = hueVsSat_CINESTILL; size_hueVsSat = 7;
@@ -1080,6 +1106,13 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         blueCurve = blueCurve_CINESTILL; size_blueCurve = 3;
         preset_saturation = 1.05f;
         preset_contrast = 1.08f;
+        // Cinestill: Strong blues (no antihalation), warm reds
+        preset_sat_comp_red = 0.90f;     // Expand reds (warm tones)
+        preset_sat_comp_yellow = 1.05f;  // Slightly compress yellows
+        preset_sat_comp_green = 1.0f;    // Neutral greens
+        preset_sat_comp_cyan = 0.75f;    // Expand cyan (teal highlights)
+        preset_sat_comp_blue = 0.80f;    // Expand blues significantly (halation effect)
+        preset_sat_comp_magenta = 0.95f;
     } else if (preset == 4) { // TEAL_ORANGE
         hueVsHue = hueVsHue_TEAL_ORANGE; size_hueVsHue = 9;
         hueVsSat = hueVsSat_TEAL_ORANGE; size_hueVsSat = 9;
@@ -1094,6 +1127,13 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         blueCurve = blueCurve_TEAL_ORANGE; size_blueCurve = 3;
         preset_saturation = 1.15f;
         preset_contrast = 1.12f;
+        // Teal & Orange: Maximum separation, punchy look
+        preset_sat_comp_red = 0.80f;     // Expand reds/oranges heavily
+        preset_sat_comp_yellow = 0.85f;  // Expand yellows (toward orange)
+        preset_sat_comp_green = 1.1f;    // Compress greens
+        preset_sat_comp_cyan = 0.70f;    // Expand cyans/teals heavily
+        preset_sat_comp_blue = 0.85f;    // Expand blues (toward teal)
+        preset_sat_comp_magenta = 1.0f;
     } else if (preset == 5) { // AGFA
         hueVsHue = hueVsHue_AGFA; size_hueVsHue = 7;
         hueVsSat = hueVsSat_AGFA; size_hueVsSat = 7;
@@ -1108,6 +1148,13 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         blueCurve = blueCurve_AGFA; size_blueCurve = 3;
         preset_saturation = 1.08f;
         preset_contrast = 1.0f;
+        // Agfa: Warm reds, muted blues, vintage character
+        preset_sat_comp_red = 0.90f;     // Expand reds (warm vintage tones)
+        preset_sat_comp_yellow = 0.95f;  // Slightly expand yellows
+        preset_sat_comp_green = 1.0f;    // Neutral greens
+        preset_sat_comp_cyan = 0.85f;    // Expand cyan slightly
+        preset_sat_comp_blue = 1.15f;    // Compress blues (muted vintage look)
+        preset_sat_comp_magenta = 1.05f; // Slightly compress magentas
     } else { // CUSTOM
         hueVsHue = hueVsHue_CUSTOM; size_hueVsHue = 2;
         hueVsSat = hueVsSat_CUSTOM; size_hueVsSat = 2;
@@ -1120,6 +1167,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         redCurve = redCurve_CUSTOM; size_redCurve = 2;
         greenCurve = greenCurve_CUSTOM; size_greenCurve = 2;
         blueCurve = blueCurve_CUSTOM; size_blueCurve = 2;
+        // Custom: Use user-defined slider values (already set as defaults above)
     }
     
     // Combine preset and user parameters
@@ -1242,14 +1290,14 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         float weight_blue = gauss_window(h, 240.0f, 60.0f);
         float weight_magenta = gauss_window(h, 300.0f, 45.0f);
 
-        // Calculate weighted compression factor
+        // Calculate weighted compression factor using preset values
         float compression = (
-            sat_compression_red * weight_red +
-            sat_compression_yellow * weight_yellow +
-            sat_compression_green * weight_green +
-            sat_compression_cyan * weight_cyan +
-            sat_compression_blue * weight_blue +
-            sat_compression_magenta * weight_magenta
+            preset_sat_comp_red * weight_red +
+            preset_sat_comp_yellow * weight_yellow +
+            preset_sat_comp_green * weight_green +
+            preset_sat_comp_cyan * weight_cyan +
+            preset_sat_comp_blue * weight_blue +
+            preset_sat_comp_magenta * weight_magenta
         );
 
         // Apply power-law compression (values < 1.0 compress high saturation)
