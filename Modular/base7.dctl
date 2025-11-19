@@ -31,7 +31,25 @@ DEFINE_UI_PARAMS(hue_loop_blue, Blue Hue Loop, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 
 DEFINE_UI_PARAMS(hue_loop_cyan, Cyan Hue Loop, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.1)
 DEFINE_UI_PARAMS(hue_loop_magenta, Magenta Hue Loop, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.1)
 DEFINE_UI_PARAMS(hue_loop_yellow, Yellow Hue Loop, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.1)
-DEFINE_UI_PARAMS(hue_loop_strength, Hue Loop Saturation Threshold, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(hue_loop_global_threshold, Hue Loop Global Saturation Threshold, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
+
+// Advanced Hue Loop Controls (per-hue saturation thresholds)
+DEFINE_UI_PARAMS(enable_advanced_hue_loops, Enable Per-Hue Thresholds, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(hue_loop_threshold_red, Red Loop Threshold, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(hue_loop_threshold_yellow, Yellow Loop Threshold, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(hue_loop_threshold_green, Green Loop Threshold, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(hue_loop_threshold_cyan, Cyan Loop Threshold, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(hue_loop_threshold_blue, Blue Loop Threshold, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(hue_loop_threshold_magenta, Magenta Loop Threshold, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
+
+// Per-Hue Saturation Compression
+DEFINE_UI_PARAMS(enable_per_hue_sat_compression, Enable Per-Hue Saturation Compression, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(sat_compression_red, Red Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(sat_compression_yellow, Yellow Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(sat_compression_green, Green Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(sat_compression_cyan, Cyan Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(sat_compression_blue, Blue Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(sat_compression_magenta, Magenta Saturation Compression, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
 
 typedef struct {
   float3 x, y, z;
@@ -645,6 +663,7 @@ __DEVICE__ float organic_lum_desat(float luminance, float shadow_desat, float hi
 __CONSTANT__ float hueVsHue_NEUTRAL[][2] = {{0.0f, 0.0f}, {360.0f, 0.0f}};
 __CONSTANT__ float hueVsSat_NEUTRAL[][2] = {{0.0f, 1.0f}, {360.0f, 1.0f}};
 __CONSTANT__ float hueVsLum_NEUTRAL[][2] = {{0.0f, 0.0f}, {360.0f, 0.0f}};
+__CONSTANT__ float lumVsHue_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
 __CONSTANT__ float satVsSat_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
 __CONSTANT__ float satVsLum_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
 __CONSTANT__ float lumVsSat_NEUTRAL[][2] = {{0.0f, 1.0f}, {1.0f, 1.0f}};
@@ -655,17 +674,18 @@ __CONSTANT__ float blueCurve_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
 
 // FUJI VELVIA PRESET
 __CONSTANT__ float hueVsHue_VELVIA[][2] = {
-    {0.0f, 5.0f}, {60.0f, 10.0f}, {120.0f, -5.0f}, {180.0f, 0.0f}, 
+    {0.0f, 5.0f}, {60.0f, 10.0f}, {120.0f, -5.0f}, {180.0f, 0.0f},
     {240.0f, 5.0f}, {300.0f, 0.0f}, {360.0f, 5.0f}
 };
 __CONSTANT__ float hueVsSat_VELVIA[][2] = {
-    {0.0f, 1.15f}, {60.0f, 1.25f}, {120.0f, 1.35f}, {180.0f, 1.2f}, 
+    {0.0f, 1.15f}, {60.0f, 1.25f}, {120.0f, 1.35f}, {180.0f, 1.2f},
     {240.0f, 1.3f}, {300.0f, 1.1f}, {360.0f, 1.15f}
 };
 __CONSTANT__ float hueVsLum_VELVIA[][2] = {
-    {0.0f, 0.0f}, {60.0f, 0.03f}, {120.0f, 0.0f}, {180.0f, -0.02f}, 
+    {0.0f, 0.0f}, {60.0f, 0.03f}, {120.0f, 0.0f}, {180.0f, -0.02f},
     {240.0f, -0.02f}, {300.0f, 0.0f}, {360.0f, 0.0f}
 };
+__CONSTANT__ float lumVsHue_VELVIA[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
 __CONSTANT__ float satVsSat_VELVIA[][2] = {
     {0.0f, 0.0f}, {0.3f, 0.32f}, {0.6f, 0.65f}, {0.85f, 0.88f}, {1.0f, 0.95f}
 };
@@ -693,9 +713,10 @@ __CONSTANT__ float hueVsSat_PORTRA[][2] = {
     {180.0f, 0.93f}, {240.0f, 0.9f}, {300.0f, 0.95f}, {360.0f, 0.95f}
 };
 __CONSTANT__ float hueVsLum_PORTRA[][2] = {
-    {0.0f, 0.0f}, {30.0f, 0.02f}, {60.0f, 0.015f}, {120.0f, 0.0f}, 
+    {0.0f, 0.0f}, {30.0f, 0.02f}, {60.0f, 0.015f}, {120.0f, 0.0f},
     {180.0f, 0.0f}, {240.0f, 0.0f}, {300.0f, 0.0f}, {360.0f, 0.0f}
 };
+__CONSTANT__ float lumVsHue_PORTRA[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
 __CONSTANT__ float satVsSat_PORTRA[][2] = {
     {0.0f, 0.0f}, {0.4f, 0.38f}, {0.7f, 0.68f}, {1.0f, 0.92f}
 };
@@ -723,9 +744,10 @@ __CONSTANT__ float hueVsSat_CINESTILL[][2] = {
     {240.0f, 1.25f}, {300.0f, 1.12f}, {360.0f, 1.15f}
 };
 __CONSTANT__ float hueVsLum_CINESTILL[][2] = {
-    {0.0f, 0.03f}, {60.0f, 0.02f}, {120.0f, 0.0f}, {180.0f, -0.03f}, 
+    {0.0f, 0.03f}, {60.0f, 0.02f}, {120.0f, 0.0f}, {180.0f, -0.03f},
     {240.0f, -0.02f}, {300.0f, 0.0f}, {360.0f, 0.03f}
 };
+__CONSTANT__ float lumVsHue_CINESTILL[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
 __CONSTANT__ float satVsSat_CINESTILL[][2] = {
     {0.0f, 0.0f}, {0.3f, 0.31f}, {0.6f, 0.63f}, {0.85f, 0.88f}, {1.0f, 0.96f}
 };
@@ -753,9 +775,10 @@ __CONSTANT__ float hueVsSat_TEAL_ORANGE[][2] = {
     {180.0f, 1.35f}, {200.0f, 1.4f}, {240.0f, 1.15f}, {300.0f, 1.0f}, {360.0f, 1.25f}
 };
 __CONSTANT__ float hueVsLum_TEAL_ORANGE[][2] = {
-    {0.0f, 0.015f}, {60.0f, 0.02f}, {120.0f, -0.015f}, {180.0f, 0.0f}, 
+    {0.0f, 0.015f}, {60.0f, 0.02f}, {120.0f, -0.015f}, {180.0f, 0.0f},
     {240.0f, -0.02f}, {300.0f, 0.0f}, {360.0f, 0.015f}
 };
+__CONSTANT__ float lumVsHue_TEAL_ORANGE[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
 __CONSTANT__ float satVsSat_TEAL_ORANGE[][2] = {
     {0.0f, 0.0f}, {0.35f, 0.38f}, {0.65f, 0.7f}, {0.9f, 0.93f}, {1.0f, 0.98f}
 };
@@ -782,9 +805,10 @@ __CONSTANT__ float hueVsSat_AGFA[][2] = {
     {240.0f, 0.98f}, {300.0f, 1.05f}, {360.0f, 1.08f}
 };
 __CONSTANT__ float hueVsLum_AGFA[][2] = {
-    {0.0f, 0.015f}, {60.0f, 0.03f}, {120.0f, 0.008f}, {180.0f, 0.0f}, 
+    {0.0f, 0.015f}, {60.0f, 0.03f}, {120.0f, 0.008f}, {180.0f, 0.0f},
     {240.0f, -0.008f}, {300.0f, 0.0f}, {360.0f, 0.015f}
 };
+__CONSTANT__ float lumVsHue_AGFA[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
 __CONSTANT__ float satVsSat_AGFA[][2] = {
     {0.0f, 0.0f}, {0.4f, 0.42f}, {0.72f, 0.76f}, {1.0f, 0.98f}
 };
@@ -805,6 +829,7 @@ __CONSTANT__ float blueCurve_AGFA[][2] = {{0.0f, 0.008f}, {0.5f, 0.51f}, {1.0f, 
 __CONSTANT__ float hueVsHue_CUSTOM[][2] = {{0.0f, 0.0f}, {360.0f, 0.0f}};
 __CONSTANT__ float hueVsSat_CUSTOM[][2] = {{0.0f, 1.0f}, {360.0f, 1.0f}};
 __CONSTANT__ float hueVsLum_CUSTOM[][2] = {{0.0f, 0.0f}, {360.0f, 0.0f}};
+__CONSTANT__ float lumVsHue_CUSTOM[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
 __CONSTANT__ float satVsSat_CUSTOM[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
 __CONSTANT__ float satVsLum_CUSTOM[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
 __CONSTANT__ float lumVsSat_CUSTOM[][2] = {{0.0f, 1.0f}, {1.0f, 1.0f}};
@@ -923,6 +948,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     const float (*hueVsHue)[2];
     const float (*hueVsSat)[2];
     const float (*hueVsLum)[2];
+    const float (*lumVsHue)[2];
     const float (*satVsSat)[2];
     const float (*satVsLum)[2];
     const float (*lumVsSat)[2];
@@ -930,8 +956,8 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     const float (*redCurve)[2];
     const float (*greenCurve)[2];
     const float (*blueCurve)[2];
-    
-    int size_hueVsHue, size_hueVsSat, size_hueVsLum;
+
+    int size_hueVsHue, size_hueVsSat, size_hueVsLum, size_lumVsHue;
     int size_satVsSat, size_satVsLum, size_lumVsSat, size_lumVsLum;
     int size_redCurve, size_greenCurve, size_blueCurve;
     
@@ -942,6 +968,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         hueVsHue = hueVsHue_NEUTRAL; size_hueVsHue = 2;
         hueVsSat = hueVsSat_NEUTRAL; size_hueVsSat = 2;
         hueVsLum = hueVsLum_NEUTRAL; size_hueVsLum = 2;
+        lumVsHue = lumVsHue_NEUTRAL; size_lumVsHue = 2;
         satVsSat = satVsSat_NEUTRAL; size_satVsSat = 2;
         satVsLum = satVsLum_NEUTRAL; size_satVsLum = 2;
         lumVsSat = lumVsSat_NEUTRAL; size_lumVsSat = 2;
@@ -953,6 +980,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         hueVsHue = hueVsHue_VELVIA; size_hueVsHue = 7;
         hueVsSat = hueVsSat_VELVIA; size_hueVsSat = 7;
         hueVsLum = hueVsLum_VELVIA; size_hueVsLum = 7;
+        lumVsHue = lumVsHue_VELVIA; size_lumVsHue = 2;
         satVsSat = satVsSat_VELVIA; size_satVsSat = 5;
         satVsLum = satVsLum_VELVIA; size_satVsLum = 3;
         lumVsSat = lumVsSat_VELVIA; size_lumVsSat = 5;
@@ -966,6 +994,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         hueVsHue = hueVsHue_PORTRA; size_hueVsHue = 8;
         hueVsSat = hueVsSat_PORTRA; size_hueVsSat = 8;
         hueVsLum = hueVsLum_PORTRA; size_hueVsLum = 8;
+        lumVsHue = lumVsHue_PORTRA; size_lumVsHue = 2;
         satVsSat = satVsSat_PORTRA; size_satVsSat = 4;
         satVsLum = satVsLum_PORTRA; size_satVsLum = 3;
         lumVsSat = lumVsSat_PORTRA; size_lumVsSat = 5;
@@ -979,6 +1008,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         hueVsHue = hueVsHue_CINESTILL; size_hueVsHue = 7;
         hueVsSat = hueVsSat_CINESTILL; size_hueVsSat = 7;
         hueVsLum = hueVsLum_CINESTILL; size_hueVsLum = 7;
+        lumVsHue = lumVsHue_CINESTILL; size_lumVsHue = 2;
         satVsSat = satVsSat_CINESTILL; size_satVsSat = 5;
         satVsLum = satVsLum_CINESTILL; size_satVsLum = 3;
         lumVsSat = lumVsSat_CINESTILL; size_lumVsSat = 5;
@@ -992,6 +1022,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         hueVsHue = hueVsHue_TEAL_ORANGE; size_hueVsHue = 9;
         hueVsSat = hueVsSat_TEAL_ORANGE; size_hueVsSat = 9;
         hueVsLum = hueVsLum_TEAL_ORANGE; size_hueVsLum = 7;
+        lumVsHue = lumVsHue_TEAL_ORANGE; size_lumVsHue = 2;
         satVsSat = satVsSat_TEAL_ORANGE; size_satVsSat = 5;
         satVsLum = satVsLum_TEAL_ORANGE; size_satVsLum = 3;
         lumVsSat = lumVsSat_TEAL_ORANGE; size_lumVsSat = 5;
@@ -1005,6 +1036,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         hueVsHue = hueVsHue_AGFA; size_hueVsHue = 7;
         hueVsSat = hueVsSat_AGFA; size_hueVsSat = 7;
         hueVsLum = hueVsLum_AGFA; size_hueVsLum = 7;
+        lumVsHue = lumVsHue_AGFA; size_lumVsHue = 2;
         satVsSat = satVsSat_AGFA; size_satVsSat = 4;
         satVsLum = satVsLum_AGFA; size_satVsLum = 3;
         lumVsSat = lumVsSat_AGFA; size_lumVsSat = 4;
@@ -1018,6 +1050,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         hueVsHue = hueVsHue_CUSTOM; size_hueVsHue = 2;
         hueVsSat = hueVsSat_CUSTOM; size_hueVsSat = 2;
         hueVsLum = hueVsLum_CUSTOM; size_hueVsLum = 2;
+        lumVsHue = lumVsHue_CUSTOM; size_lumVsHue = 2;
         satVsSat = satVsSat_CUSTOM; size_satVsSat = 2;
         satVsLum = satVsLum_CUSTOM; size_satVsLum = 2;
         lumVsSat = lumVsSat_CUSTOM; size_lumVsSat = 2;
@@ -1077,11 +1110,6 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     // This creates "spiral" paths in color space where hue rotates as saturation increases
     // Different for each primary/secondary hue region
     if (enable_hue_loops) {
-        // Calculate saturation factor (0.0 at low sat, 1.0 at high sat)
-        // Uses hue_loop_strength as the threshold
-        float sat_factor = _fmaxf(0.0f, (s - hue_loop_strength) / (1.0f - hue_loop_strength));
-        sat_factor = sat_factor * sat_factor; // Quadratic easing for smooth transition
-
         // Calculate hue region weights using Gaussian windows
         // Primary hues (60° width for broader influence)
         float weight_red = gauss_window(h, 0.0f, 60.0f);
@@ -1092,6 +1120,27 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         float weight_yellow = gauss_window(h, 60.0f, 45.0f);
         float weight_cyan = gauss_window(h, 180.0f, 45.0f);
         float weight_magenta = gauss_window(h, 300.0f, 45.0f);
+
+        // Calculate saturation factor with per-hue thresholds (if enabled)
+        float sat_factor;
+        if (enable_advanced_hue_loops) {
+            // Calculate weighted threshold for this hue
+            float threshold = (
+                hue_loop_threshold_red * weight_red +
+                hue_loop_threshold_yellow * weight_yellow +
+                hue_loop_threshold_green * weight_green +
+                hue_loop_threshold_cyan * weight_cyan +
+                hue_loop_threshold_blue * weight_blue +
+                hue_loop_threshold_magenta * weight_magenta
+            );
+            threshold = _fmaxf(threshold, 0.01f); // Prevent division by zero
+            sat_factor = _fmaxf(0.0f, (s - threshold) / (1.0f - threshold));
+        } else {
+            // Use global threshold
+            sat_factor = _fmaxf(0.0f, (s - hue_loop_global_threshold) / (1.0f - hue_loop_global_threshold));
+        }
+
+        sat_factor = sat_factor * sat_factor; // Quadratic easing for smooth transition
 
         // Calculate weighted hue shift for this saturation level
         float hue_loop_shift = sat_factor * (
@@ -1114,14 +1163,45 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     // 6. Luminance → Saturation
     float sat_mult_lum = cubic_spline_interpolate(v, lumVsSat, size_lumVsSat);
     s = clamp(s * sat_mult_lum, 0.0f, (working_colorspace == 1) ? 2.0f : 1.0f);
-    
+
+    // 6b. Luminance → Hue (NEW: luminance-dependent hue shift)
+    // Film can shift hues differently in shadows vs highlights
+    float hue_shift_lum = cubic_spline_interpolate(v, lumVsHue, size_lumVsHue);
+    h = fmod_positive(h + hue_shift_lum, 360.0f);
+
+    // 6c. Per-Hue Saturation Compression (NEW)
+    // Different hues compress saturation differently at high chroma
+    if (enable_per_hue_sat_compression && s > 0.01f) {
+        // Calculate hue region weights
+        float weight_red = gauss_window(h, 0.0f, 60.0f);
+        float weight_yellow = gauss_window(h, 60.0f, 45.0f);
+        float weight_green = gauss_window(h, 120.0f, 60.0f);
+        float weight_cyan = gauss_window(h, 180.0f, 45.0f);
+        float weight_blue = gauss_window(h, 240.0f, 60.0f);
+        float weight_magenta = gauss_window(h, 300.0f, 45.0f);
+
+        // Calculate weighted compression factor
+        float compression = (
+            sat_compression_red * weight_red +
+            sat_compression_yellow * weight_yellow +
+            sat_compression_green * weight_green +
+            sat_compression_cyan * weight_cyan +
+            sat_compression_blue * weight_blue +
+            sat_compression_magenta * weight_magenta
+        );
+
+        // Apply power-law compression (values < 1.0 compress high saturation)
+        s = _powf(s, compression);
+        s = clamp(s, 0.0f, (working_colorspace == 1) ? 2.0f : 1.0f);
+    }
+
     // Apply organic highlight/shadow desaturation
     float desat_factor = organic_lum_desat(v, shadow_desat, highlight_desat);
     s = clamp(s * desat_factor, 0.0f, (working_colorspace == 1) ? 2.0f : 1.0f);
-    
+
     // Apply global saturation
     s = clamp(s * final_saturation, 0.0f, (working_colorspace == 1) ? 2.0f : 1.0f);
-    
+
     // 7. Luminance → Luminance (tone curve)
     v = cubic_spline_interpolate(v, lumVsLum, size_lumVsLum);
     
