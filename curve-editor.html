@@ -31,21 +31,84 @@
 
         .main-layout {
             display: grid;
-            grid-template-columns: 2fr 1fr;
+            grid-template-columns: 1fr 550px;
             gap: 30px;
             margin-bottom: 30px;
+            align-items: start;
         }
 
         .curves-container {
             display: flex;
             flex-direction: column;
             gap: 30px;
+            max-height: calc(100vh - 140px);
+            overflow-y: auto;
+            padding-right: 15px;
+        }
+
+        .curves-container::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        .curves-container::-webkit-scrollbar-track {
+            background: #1a1a1a;
+            border-radius: 5px;
+        }
+
+        .curves-container::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 5px;
+        }
+
+        .curves-container::-webkit-scrollbar-thumb:hover {
+            background: #555;
         }
 
         .visualizations-container {
             display: flex;
             flex-direction: column;
-            gap: 30px;
+            gap: 20px;
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #444;
+            position: sticky;
+            top: 20px;
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
+        }
+
+        .visualizations-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .visualizations-container::-webkit-scrollbar-track {
+            background: #1a1a1a;
+            border-radius: 4px;
+        }
+
+        .visualizations-container::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+        }
+
+        .visualization-box {
+            background: #1e1e1e;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+
+        .visualization-box h2 {
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: #e0e0e0;
+        }
+
+        .visualization-box p {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 10px;
         }
 
         .curve-editor {
@@ -76,11 +139,16 @@
         }
 
         .curve-canvas {
-            height: 300px;
+            height: auto;
+            aspect-ratio: 4/3;
+            max-height: 900px;
         }
 
         .vectorscope-canvas {
-            height: 400px;
+            width: 100%;
+            height: auto;
+            margin: 0 auto;
+            display: block;
         }
 
         .preview-canvas {
@@ -301,15 +369,17 @@
                     <div class="preset-controls">
                         <select id="sat-to-hue-preset" onchange="loadPreset('sat-to-hue', this.value)">
                             <option value="">-- Load Preset --</option>
-                            <option value="cross-process">Cross-Process</option>
+                            <option value="neutral">Neutral</option>
+                            <option value="kodak-5219">Kodak 5219 Vision3</option>
+                            <option value="fuji-eterna">Fuji Eterna 500T</option>
+                            <option value="ektachrome">Ektachrome E100</option>
+                            <option value="agfa-xtr">Agfa XTR 100</option>
+                            <option value="teal-orange">Teal & Orange</option>
                             <option value="bleach-bypass">Bleach Bypass</option>
-                            <option value="teal-orange">Teal-Orange</option>
-                            <option value="warm-shift">Warm Shift</option>
-                            <option value="cool-shift">Cool Shift</option>
                         </select>
                     </div>
 
-                    <canvas id="sat-to-hue-canvas" class="curve-canvas" width="800" height="600"></canvas>
+                    <canvas id="sat-to-hue-canvas" class="curve-canvas" width="1200" height="900"></canvas>
 
                     <div class="gradient-preview">
                         <h3>Preview: Hue Ring Transformation</h3>
@@ -333,14 +403,17 @@
                     <div class="preset-controls">
                         <select id="lum-to-hue-preset" onchange="loadPreset('lum-to-hue', this.value)">
                             <option value="">-- Load Preset --</option>
-                            <option value="shadow-blue">Shadow Blue Shift</option>
-                            <option value="highlight-warm">Highlight Warm</option>
-                            <option value="split-tone">Split Tone</option>
-                            <option value="vintage">Vintage Film</option>
+                            <option value="neutral">Neutral</option>
+                            <option value="kodak-5219">Kodak 5219 Vision3</option>
+                            <option value="fuji-eterna">Fuji Eterna 500T</option>
+                            <option value="ektachrome">Ektachrome E100</option>
+                            <option value="agfa-xtr">Agfa XTR 100</option>
+                            <option value="teal-orange">Teal & Orange</option>
+                            <option value="bleach-bypass">Bleach Bypass</option>
                         </select>
                     </div>
 
-                    <canvas id="lum-to-hue-canvas" class="curve-canvas" width="800" height="600"></canvas>
+                    <canvas id="lum-to-hue-canvas" class="curve-canvas" width="1200" height="900"></canvas>
 
                     <div class="gradient-preview">
                         <h3>Preview: Luminance to Hue Shift</h3>
@@ -364,15 +437,17 @@
                     <div class="preset-controls">
                         <select id="lum-to-lum-preset" onchange="loadPreset('lum-to-lum', this.value)">
                             <option value="">-- Load Preset --</option>
-                            <option value="s-curve">S-Curve (Film Contrast)</option>
-                            <option value="soft-contrast">Soft Contrast</option>
-                            <option value="hard-contrast">Hard Contrast</option>
-                            <option value="lifted-blacks">Lifted Blacks</option>
-                            <option value="crushed-blacks">Crushed Blacks</option>
+                            <option value="neutral">Neutral</option>
+                            <option value="kodak-5219">Kodak 5219 Vision3</option>
+                            <option value="fuji-eterna">Fuji Eterna 500T</option>
+                            <option value="ektachrome">Ektachrome E100</option>
+                            <option value="agfa-xtr">Agfa XTR 100</option>
+                            <option value="teal-orange">Teal & Orange</option>
+                            <option value="bleach-bypass">Bleach Bypass</option>
                         </select>
                     </div>
 
-                    <canvas id="lum-to-lum-canvas" class="curve-canvas" width="800" height="600"></canvas>
+                    <canvas id="lum-to-lum-canvas" class="curve-canvas" width="1200" height="900"></canvas>
 
                     <div class="gradient-preview">
                         <h3>Preview: Tone Response</h3>
@@ -396,13 +471,17 @@
                     <div class="preset-controls">
                         <select id="red-density-preset" onchange="loadPreset('red-density', this.value)">
                             <option value="">-- Load Preset --</option>
-                            <option value="kodak-5219">Kodak 5219</option>
-                            <option value="fuji-eterna">Fuji Eterna</option>
-                            <option value="low-contrast">Low Contrast</option>
+                            <option value="neutral">Neutral</option>
+                            <option value="kodak-5219">Kodak 5219 Vision3</option>
+                            <option value="fuji-eterna">Fuji Eterna 500T</option>
+                            <option value="ektachrome">Ektachrome E100</option>
+                            <option value="agfa-xtr">Agfa XTR 100</option>
+                            <option value="teal-orange">Teal & Orange</option>
+                            <option value="bleach-bypass">Bleach Bypass</option>
                         </select>
                     </div>
 
-                    <canvas id="red-density-canvas" class="curve-canvas" width="800" height="600"></canvas>
+                    <canvas id="red-density-canvas" class="curve-canvas" width="1200" height="900"></canvas>
 
                     <div class="gradient-preview">
                         <h3>Preview: Red Channel Response</h3>
@@ -426,13 +505,17 @@
                     <div class="preset-controls">
                         <select id="green-density-preset" onchange="loadPreset('green-density', this.value)">
                             <option value="">-- Load Preset --</option>
-                            <option value="kodak-5219">Kodak 5219</option>
-                            <option value="fuji-eterna">Fuji Eterna</option>
-                            <option value="low-contrast">Low Contrast</option>
+                            <option value="neutral">Neutral</option>
+                            <option value="kodak-5219">Kodak 5219 Vision3</option>
+                            <option value="fuji-eterna">Fuji Eterna 500T</option>
+                            <option value="ektachrome">Ektachrome E100</option>
+                            <option value="agfa-xtr">Agfa XTR 100</option>
+                            <option value="teal-orange">Teal & Orange</option>
+                            <option value="bleach-bypass">Bleach Bypass</option>
                         </select>
                     </div>
 
-                    <canvas id="green-density-canvas" class="curve-canvas" width="800" height="600"></canvas>
+                    <canvas id="green-density-canvas" class="curve-canvas" width="1200" height="900"></canvas>
 
                     <div class="gradient-preview">
                         <h3>Preview: Green Channel Response</h3>
@@ -456,13 +539,17 @@
                     <div class="preset-controls">
                         <select id="blue-density-preset" onchange="loadPreset('blue-density', this.value)">
                             <option value="">-- Load Preset --</option>
-                            <option value="kodak-5219">Kodak 5219</option>
-                            <option value="fuji-eterna">Fuji Eterna</option>
-                            <option value="low-contrast">Low Contrast</option>
+                            <option value="neutral">Neutral</option>
+                            <option value="kodak-5219">Kodak 5219 Vision3</option>
+                            <option value="fuji-eterna">Fuji Eterna 500T</option>
+                            <option value="ektachrome">Ektachrome E100</option>
+                            <option value="agfa-xtr">Agfa XTR 100</option>
+                            <option value="teal-orange">Teal & Orange</option>
+                            <option value="bleach-bypass">Bleach Bypass</option>
                         </select>
                     </div>
 
-                    <canvas id="blue-density-canvas" class="curve-canvas" width="800" height="600"></canvas>
+                    <canvas id="blue-density-canvas" class="curve-canvas" width="1200" height="900"></canvas>
 
                     <div class="gradient-preview">
                         <h3>Preview: Blue Channel Response</h3>
@@ -485,21 +572,35 @@
                 <div class="visualization-box">
                     <h2>Sat → Hue Vectorscope</h2>
                     <p>Shows how saturation affects hue rotation. Outer ring = high saturation, inner ring = low saturation.</p>
-                    <canvas id="sat-vectorscope" class="vectorscope-canvas" width="600" height="600"></canvas>
+                    <canvas id="sat-vectorscope" class="vectorscope-canvas" width="300" height="300"></canvas>
                 </div>
 
                 <!-- Lum to Hue Vectorscope -->
                 <div class="visualization-box">
                     <h2>Lum → Hue Vectorscope</h2>
                     <p>Shows how luminance affects hue rotation. Outer ring = bright, inner ring = dark.</p>
-                    <canvas id="lum-vectorscope" class="vectorscope-canvas" width="600" height="600"></canvas>
+                    <canvas id="lum-vectorscope" class="vectorscope-canvas" width="300" height="300"></canvas>
                 </div>
 
                 <!-- Combined Hue Wheel -->
                 <div class="visualization-box">
                     <h2>Combined Hue Transformation</h2>
                     <p>Visual representation of final hue mapping after both Sat→Hue and Lum→Hue.</p>
-                    <canvas id="combined-hue-wheel" class="vectorscope-canvas" width="600" height="600"></canvas>
+                    <canvas id="combined-hue-wheel" class="vectorscope-canvas" width="300" height="300"></canvas>
+                </div>
+
+                <!-- Luminance Response -->
+                <div class="visualization-box">
+                    <h2>Luminance Response</h2>
+                    <p>Tone curve showing input vs output luminance mapping.</p>
+                    <canvas id="lum-response" class="vectorscope-canvas" width="300" height="300"></canvas>
+                </div>
+
+                <!-- Density Transform -->
+                <div class="visualization-box">
+                    <h2>Density Transform</h2>
+                    <p>Shows how R/G/B density curves affect color (cyan/magenta/yellow dye layers).</p>
+                    <canvas id="density-vectorscope" class="vectorscope-canvas" width="300" height="300"></canvas>
                 </div>
             </div>
         </div>
@@ -560,39 +661,60 @@
 
         const presets = {
             'sat-to-hue': {
-                'cross-process': [{x: 0, y: 0}, {x: 0.3, y: -8}, {x: 0.7, y: 12}, {x: 1, y: -5}],
-                'bleach-bypass': [{x: 0, y: 0}, {x: 0.5, y: -15}, {x: 1, y: -10}],
-                'teal-orange': [{x: 0, y: 0}, {x: 0.4, y: 15}, {x: 0.7, y: -12}, {x: 1, y: 8}],
+                'neutral': [{x: 0, y: 0}, {x: 1, y: 0}],
+                'kodak-5219': [{x: 0, y: 0}, {x: 0.6, y: 3}, {x: 1, y: 8}],
+                'fuji-eterna': [{x: 0, y: 0}, {x: 0.4, y: -4}, {x: 1, y: -8}],
+                'ektachrome': [{x: 0, y: 0}, {x: 0.5, y: 5}, {x: 1, y: 18}],
+                'agfa-xtr': [{x: 0, y: 0}, {x: 0.5, y: -3}, {x: 1, y: -6}],
+                'teal-orange': [{x: 0, y: 0}, {x: 0.3, y: -15}, {x: 0.7, y: 10}, {x: 1, y: 5}],
+                'bleach-bypass': [{x: 0, y: 0}, {x: 0.5, y: -8}, {x: 1, y: -15}],
                 'warm-shift': [{x: 0, y: 0}, {x: 0.5, y: 10}, {x: 1, y: 15}],
                 'cool-shift': [{x: 0, y: 0}, {x: 0.5, y: -10}, {x: 1, y: -15}]
             },
             'lum-to-hue': {
-                'shadow-blue': [{x: 0, y: -15}, {x: 0.3, y: -5}, {x: 0.7, y: 0}, {x: 1, y: 0}],
-                'highlight-warm': [{x: 0, y: 0}, {x: 0.3, y: 0}, {x: 0.7, y: 5}, {x: 1, y: 12}],
-                'split-tone': [{x: 0, y: -12}, {x: 0.5, y: 0}, {x: 1, y: 15}],
-                'vintage': [{x: 0, y: 8}, {x: 0.4, y: -5}, {x: 0.8, y: 10}, {x: 1, y: 12}]
+                'neutral': [{x: 0, y: 0}, {x: 1, y: 0}],
+                'kodak-5219': [{x: 0, y: -5}, {x: 0.18, y: 0}, {x: 0.7, y: 6}, {x: 1, y: 10}],
+                'fuji-eterna': [{x: 0, y: -12}, {x: 0.18, y: -3}, {x: 0.8, y: 2}, {x: 1, y: 5}],
+                'ektachrome': [{x: 0, y: -10}, {x: 0.18, y: 0}, {x: 0.6, y: 8}, {x: 1, y: 15}],
+                'agfa-xtr': [{x: 0, y: 2}, {x: 0.18, y: 1}, {x: 0.8, y: -2}, {x: 1, y: -4}],
+                'teal-orange': [{x: 0, y: -20}, {x: 0.18, y: -8}, {x: 0.5, y: 0}, {x: 0.75, y: 12}, {x: 1, y: 18}],
+                'bleach-bypass': [{x: 0, y: -6}, {x: 0.18, y: -4}, {x: 1, y: -2}]
             },
             'lum-to-lum': {
-                's-curve': [{x: 0, y: 0}, {x: 0.25, y: 0.18}, {x: 0.5, y: 0.5}, {x: 0.75, y: 0.82}, {x: 1, y: 1}],
-                'soft-contrast': [{x: 0, y: 0}, {x: 0.5, y: 0.48}, {x: 1, y: 1}],
-                'hard-contrast': [{x: 0, y: 0}, {x: 0.5, y: 0.52}, {x: 1, y: 1}],
-                'lifted-blacks': [{x: 0, y: 0.15}, {x: 0.5, y: 0.5}, {x: 1, y: 1}],
-                'crushed-blacks': [{x: 0, y: 0}, {x: 0.2, y: 0.05}, {x: 0.5, y: 0.5}, {x: 1, y: 1}]
+                'neutral': [{x: 0, y: 0}, {x: 1, y: 1}],
+                'kodak-5219': [{x: 0, y: 0}, {x: 0.05, y: 0.08}, {x: 0.18, y: 0.21}, {x: 0.6, y: 0.65}, {x: 1, y: 1}],
+                'fuji-eterna': [{x: 0, y: 0.02}, {x: 0.18, y: 0.22}, {x: 0.7, y: 0.72}, {x: 1, y: 0.96}],
+                'ektachrome': [{x: 0, y: 0}, {x: 0.18, y: 0.16}, {x: 0.6, y: 0.68}, {x: 1, y: 1}],
+                'agfa-xtr': [{x: 0, y: 0.04}, {x: 0.18, y: 0.24}, {x: 0.7, y: 0.74}, {x: 1, y: 0.94}],
+                'teal-orange': [{x: 0, y: 0}, {x: 0.18, y: 0.15}, {x: 0.6, y: 0.72}, {x: 1, y: 1}],
+                'bleach-bypass': [{x: 0, y: 0}, {x: 0.1, y: 0.05}, {x: 0.18, y: 0.14}, {x: 0.7, y: 0.8}, {x: 1, y: 1}]
             },
             'red-density': {
+                'neutral': [{x: 0, y: 0}, {x: 1, y: 1}],
                 'kodak-5219': [{x: 0, y: 0}, {x: 0.5, y: 0.48}, {x: 1, y: 1}],
                 'fuji-eterna': [{x: 0, y: 0}, {x: 0.5, y: 0.52}, {x: 1, y: 1}],
-                'low-contrast': [{x: 0, y: 0.05}, {x: 0.5, y: 0.5}, {x: 1, y: 0.95}]
+                'ektachrome': [{x: 0, y: 0}, {x: 0.5, y: 0.46}, {x: 1, y: 1}],
+                'agfa-xtr': [{x: 0, y: 0}, {x: 0.5, y: 0.49}, {x: 1, y: 1}],
+                'teal-orange': [{x: 0, y: 0}, {x: 0.3, y: 0.26}, {x: 0.7, y: 0.75}, {x: 1, y: 1}],
+                'bleach-bypass': [{x: 0, y: 0}, {x: 0.5, y: 0.46}, {x: 1, y: 1}]
             },
             'green-density': {
+                'neutral': [{x: 0, y: 0}, {x: 1, y: 1}],
                 'kodak-5219': [{x: 0, y: 0}, {x: 0.5, y: 0.50}, {x: 1, y: 1}],
                 'fuji-eterna': [{x: 0, y: 0}, {x: 0.5, y: 0.48}, {x: 1, y: 1}],
-                'low-contrast': [{x: 0, y: 0.05}, {x: 0.5, y: 0.5}, {x: 1, y: 0.95}]
+                'ektachrome': [{x: 0, y: 0}, {x: 0.5, y: 0.51}, {x: 1, y: 1}],
+                'agfa-xtr': [{x: 0, y: 0}, {x: 0.5, y: 0.52}, {x: 1, y: 1}],
+                'teal-orange': [{x: 0, y: 0}, {x: 0.5, y: 0.48}, {x: 1, y: 1}],
+                'bleach-bypass': [{x: 0, y: 0}, {x: 0.5, y: 0.47}, {x: 1, y: 1}]
             },
             'blue-density': {
+                'neutral': [{x: 0, y: 0}, {x: 1, y: 1}],
                 'kodak-5219': [{x: 0, y: 0}, {x: 0.5, y: 0.52}, {x: 1, y: 1}],
                 'fuji-eterna': [{x: 0, y: 0}, {x: 0.5, y: 0.50}, {x: 1, y: 1}],
-                'low-contrast': [{x: 0, y: 0.05}, {x: 0.5, y: 0.5}, {x: 0.95, y: 0.95}]
+                'ektachrome': [{x: 0, y: 0}, {x: 0.5, y: 0.54}, {x: 1, y: 1}],
+                'agfa-xtr': [{x: 0, y: 0}, {x: 0.5, y: 0.48}, {x: 1, y: 1}],
+                'teal-orange': [{x: 0, y: 0}, {x: 0.3, y: 0.35}, {x: 0.7, y: 0.68}, {x: 1, y: 1}],
+                'bleach-bypass': [{x: 0, y: 0}, {x: 0.5, y: 0.51}, {x: 1, y: 1}]
             }
         };
 
@@ -908,90 +1030,307 @@
         function drawVectorscope(canvasId, curveKey, isCombined = false) {
             const canvas = document.getElementById(canvasId);
             const ctx = canvas.getContext('2d');
-            const centerX = canvas.width / 2;
-            const centerY = canvas.height / 2;
-            const radius = Math.min(centerX, centerY) - 40;
+            const w = canvas.width;
+            const h = canvas.height;
+            const centerX = w / 2;
+            const centerY = h / 2;
+            const radius = Math.min(centerX, centerY) - 30;
 
-            ctx.fillStyle = '#1a1a1a';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // Black background (JP_2499 style)
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, w, h);
 
-            // Draw concentric circles
-            ctx.strokeStyle = '#333333';
+            // Subtle grid - 2 concentric circles for clarity
+            ctx.strokeStyle = '#1a1a1a';
             ctx.lineWidth = 1;
-            for (let r = radius / 4; r <= radius; r += radius / 4) {
+            for (let i = 1; i <= 2; i++) {
                 ctx.beginPath();
-                ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
+                ctx.arc(centerX, centerY, radius * (i / 2), 0, Math.PI * 2);
                 ctx.stroke();
             }
 
-            // Draw hue lines (every 30 degrees)
-            for (let angle = 0; angle < 360; angle += 30) {
-                const rad = (angle - 90) * Math.PI / 180;
+            // Hue spokes at primary/secondary hues
+            const hueSpokes = [
+                [0, 'R'], [60, 'Y'], [120, 'G'], [180, 'C'], [240, 'B'], [300, 'M']
+            ];
+
+            hueSpokes.forEach(([hue, label]) => {
+                const angle = (hue - 90) * Math.PI / 180;
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 2;
                 ctx.beginPath();
                 ctx.moveTo(centerX, centerY);
-                ctx.lineTo(centerX + radius * Math.cos(rad), centerY + radius * Math.sin(rad));
+                ctx.lineTo(centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius);
                 ctx.stroke();
-            }
+            });
 
-            // Draw hue ring with transformations
+            // Draw dense hue/saturation point cloud
             const satCurve = curves['sat-to-hue'];
             const lumCurve = curves['lum-to-hue'];
 
-            for (let angle = 0; angle < 360; angle += 1) {
-                for (let r = 0; r < radius; r += 2) {
-                    const inputHue = angle;
+            // Ensure points are sorted
+            satCurve.points.sort((a, b) => a.x - b.x);
+            lumCurve.points.sort((a, b) => a.x - b.x);
+
+            // Dense sampling for smooth vectorscope
+            for (let hue = 0; hue < 360; hue += 5) {
+                for (let sat = 0.1; sat <= 1.0; sat += 0.1) {
                     let hueShift = 0;
 
                     if (curveKey === 'sat-to-hue') {
-                        const sat = r / radius;
                         hueShift = cubicSplineInterpolate(sat, satCurve.points);
                     } else if (curveKey === 'lum-to-hue') {
-                        const lum = r / radius;
-                        hueShift = cubicSplineInterpolate(lum, lumCurve.points);
+                        // For lum-to-hue, use saturation as proxy for luminance
+                        hueShift = cubicSplineInterpolate(sat, lumCurve.points);
                     } else if (isCombined) {
-                        const sat = r / radius;
-                        const lum = r / radius;
                         hueShift = cubicSplineInterpolate(sat, satCurve.points) +
-                                   cubicSplineInterpolate(lum, lumCurve.points);
+                                   cubicSplineInterpolate(sat, lumCurve.points);
                     }
 
-                    const outputHue = (inputHue + hueShift + 360) % 360;
-                    const rad = (outputHue - 90) * Math.PI / 180;
+                    const outputHue = (hue + hueShift + 360) % 360;
+                    const angle = (outputHue - 90) * Math.PI / 180;
+                    const r = sat * radius;
+                    const x = centerX + Math.cos(angle) * r;
+                    const y = centerY + Math.sin(angle) * r;
 
-                    const brightness = 0.3 + (r / radius) * 0.7;
-                    const color = hslToRgb(inputHue, 1, brightness);
-
-                    const x = centerX + r * Math.cos(rad);
-                    const y = centerY + r * Math.sin(rad);
-
+                    // Color the point based on output hue
+                    const color = hslToRgb(outputHue, sat, 0.5);
                     ctx.fillStyle = `rgb(${color.r}, ${color.g}, ${color.b})`;
-                    ctx.fillRect(x, y, 2, 2);
+                    ctx.fillRect(x - 1, y - 1, 2, 2);
                 }
             }
 
-            // Draw labels
-            ctx.fillStyle = '#ffffff';
-            ctx.font = '14px Arial';
+            // Draw labels in subtle gray
+            ctx.fillStyle = '#666';
+            ctx.font = '14px monospace';
             ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
 
-            const labelRadius = radius + 20;
-            const labels = [
-                {angle: 0, text: 'R', color: '#ff0000'},
-                {angle: 60, text: 'Y', color: '#ffff00'},
-                {angle: 120, text: 'G', color: '#00ff00'},
-                {angle: 180, text: 'C', color: '#00ffff'},
-                {angle: 240, text: 'B', color: '#0000ff'},
-                {angle: 300, text: 'M', color: '#ff00ff'}
+            hueSpokes.forEach(([hue, label]) => {
+                const angle = (hue - 90) * Math.PI / 180;
+                const labelDist = radius - 15;
+                const x = centerX + Math.cos(angle) * labelDist;
+                const y = centerY + Math.sin(angle) * labelDist;
+                ctx.fillText(label, x, y);
+            });
+        }
+
+        // Draw luminance response visualization
+        function drawLumResponse() {
+            const canvas = document.getElementById('lum-response');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const padding = 40;
+
+            // Black background
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, w, h);
+
+            const lumCurve = curves['lum-to-lum'];
+            lumCurve.points.sort((a, b) => a.x - b.x);
+
+            // Draw input gradient bar (bottom)
+            const barHeight = 30;
+            const barY = h - padding + 10;
+            for (let i = 0; i < w - 2 * padding; i++) {
+                const t = i / (w - 2 * padding);
+                const gray = Math.floor(t * 255);
+                ctx.fillStyle = `rgb(${gray}, ${gray}, ${gray})`;
+                ctx.fillRect(padding + i, barY, 1, barHeight);
+            }
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(padding, barY, w - 2 * padding, barHeight);
+
+            // Draw output gradient bar (left side, vertical) - transformed
+            const barWidth = 30;
+            const barX = padding - barWidth - 10;
+            for (let i = 0; i < h - 2 * padding; i++) {
+                const t = 1 - (i / (h - 2 * padding)); // inverted because canvas Y goes down
+                const outputLum = cubicSplineInterpolate(t, lumCurve.points);
+                const gray = Math.floor(outputLum * 255);
+                ctx.fillStyle = `rgb(${gray}, ${gray}, ${gray})`;
+                ctx.fillRect(barX, padding + i, barWidth, 1);
+            }
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(barX, padding, barWidth, h - 2 * padding);
+
+            // Grid
+            ctx.strokeStyle = '#1a1a1a';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const x = padding + (i / 4) * (w - 2 * padding);
+                const y = padding + (i / 4) * (h - 2 * padding);
+                ctx.beginPath();
+                ctx.moveTo(x, padding);
+                ctx.lineTo(x, h - padding);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(padding, y);
+                ctx.lineTo(w - padding, y);
+                ctx.stroke();
+            }
+
+            // Diagonal reference line
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(padding, h - padding);
+            ctx.lineTo(w - padding, padding);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw curve
+            ctx.strokeStyle = '#4a9eff';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+
+            for (let i = 0; i <= 100; i++) {
+                const t = i / 100;
+                const outputLum = cubicSplineInterpolate(t, lumCurve.points);
+                const x = padding + t * (w - 2 * padding);
+                const y = h - padding - outputLum * (h - 2 * padding);
+
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+
+            // Labels
+            ctx.fillStyle = '#888';
+            ctx.font = '11px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('Input', w / 2, barY + barHeight + 15);
+            ctx.save();
+            ctx.translate(barX + barWidth / 2, h / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('Output', 0, 0);
+            ctx.restore();
+        }
+
+        // Draw density transform vectorscope
+        function drawDensityVectorscope() {
+            const canvas = document.getElementById('density-vectorscope');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const centerX = w / 2;
+            const centerY = h / 2;
+            const radius = Math.min(centerX, centerY) - 30;
+
+            // Black background
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, w, h);
+
+            // Grid - 2 concentric circles
+            ctx.strokeStyle = '#1a1a1a';
+            ctx.lineWidth = 1;
+            for (let i = 1; i <= 2; i++) {
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, radius * (i / 2), 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            // Hue spokes
+            const hueSpokes = [
+                [0, 'R'], [60, 'Y'], [120, 'G'], [180, 'C'], [240, 'B'], [300, 'M']
             ];
 
-            labels.forEach(label => {
-                const rad = (label.angle - 90) * Math.PI / 180;
-                const x = centerX + labelRadius * Math.cos(rad);
-                const y = centerY + labelRadius * Math.sin(rad);
-
-                ctx.fillStyle = label.color;
-                ctx.fillText(label.text, x, y + 5);
+            hueSpokes.forEach(([hue, label]) => {
+                const angle = (hue - 90) * Math.PI / 180;
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.lineTo(centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius);
+                ctx.stroke();
             });
+
+            // Get density curves
+            const redCurve = curves['red-density'];
+            const greenCurve = curves['green-density'];
+            const blueCurve = curves['blue-density'];
+
+            redCurve.points.sort((a, b) => a.x - b.x);
+            greenCurve.points.sort((a, b) => a.x - b.x);
+            blueCurve.points.sort((a, b) => a.x - b.x);
+
+            // Draw color transformation points
+            for (let hue = 0; hue < 360; hue += 2) {
+                for (let sat = 0.1; sat <= 1.0; sat += 0.05) {
+                    // Convert HSL to RGB
+                    const inputColor = hslToRgb(hue, sat, 0.5);
+                    const r = inputColor.r / 255;
+                    const g = inputColor.g / 255;
+                    const b = inputColor.b / 255;
+
+                    // Apply density curves (simulating film dye layers)
+                    const rOut = cubicSplineInterpolate(r, redCurve.points);
+                    const gOut = cubicSplineInterpolate(g, greenCurve.points);
+                    const bOut = cubicSplineInterpolate(b, blueCurve.points);
+
+                    // Convert back to HSL to get output hue/saturation
+                    const outputColor = rgbToHsl(rOut * 255, gOut * 255, bOut * 255);
+                    const outputHue = outputColor.h;
+                    const outputSat = outputColor.s;
+
+                    const angle = (outputHue - 90) * Math.PI / 180;
+                    const r_pos = outputSat * radius;
+                    const x = centerX + Math.cos(angle) * r_pos;
+                    const y = centerY + Math.sin(angle) * r_pos;
+
+                    // Color by output
+                    ctx.fillStyle = `rgb(${rOut*255}, ${gOut*255}, ${bOut*255})`;
+                    ctx.fillRect(x - 1, y - 1, 2, 2);
+                }
+            }
+
+            // Labels
+            ctx.fillStyle = '#666';
+            ctx.font = '14px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            hueSpokes.forEach(([hue, label]) => {
+                const angle = (hue - 90) * Math.PI / 180;
+                const labelDist = radius - 15;
+                const x = centerX + Math.cos(angle) * labelDist;
+                const y = centerY + Math.sin(angle) * labelDist;
+                ctx.fillText(label, x, y);
+            });
+        }
+
+        // RGB to HSL helper
+        function rgbToHsl(r, g, b) {
+            r /= 255;
+            g /= 255;
+            b /= 255;
+
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const l = (max + min) / 2;
+            let h, s;
+
+            if (max === min) {
+                h = s = 0;
+            } else {
+                const d = max - min;
+                s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+
+                switch (max) {
+                    case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+                    case g: h = ((b - r) / d + 2) / 6; break;
+                    case b: h = ((r - g) / d + 4) / 6; break;
+                }
+            }
+
+            return { h: h * 360, s: s, l: l };
         }
 
         // Update all visualizations
@@ -1006,6 +1345,8 @@
             drawVectorscope('sat-vectorscope', 'sat-to-hue');
             drawVectorscope('lum-vectorscope', 'lum-to-hue');
             drawVectorscope('combined-hue-wheel', null, true);
+            drawLumResponse();
+            drawDensityVectorscope();
         }
 
         // Update point editor

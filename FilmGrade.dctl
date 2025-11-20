@@ -15,7 +15,7 @@
 // Designed to complement DaVinci Resolve's native curves (Hue→Hue, Hue→Sat, Lum→Sat, etc.)
 // Pure 1D color transform (no spatial operations)
 
-DEFINE_UI_PARAMS(preset, Film Preset, DCTLUI_COMBO_BOX, 0, {NEUTRAL, ICONIC_FILM}, {Neutral, Iconic Film})
+DEFINE_UI_PARAMS(preset, Film Preset, DCTLUI_COMBO_BOX, 0, {NEUTRAL, KODAK_5219, FUJI_ETERNA, EKTACHROME, AGFA_XTR, TEAL_ORANGE, BLEACH_BYPASS}, {Neutral, Kodak 5219 Vision3, Fuji Eterna 500T, Ektachrome E100, Agfa XTR 100, Teal & Orange, Bleach Bypass})
 
 // Output Settings
 DEFINE_UI_PARAMS(output_mode, Output Mode, DCTLUI_COMBO_BOX, 0, {LOG_PASSTHROUGH, REC709_GAMMA22, REC709_GAMMA24, SRGB}, {Log Passthrough, Rec.709 Gamma 2.2, Rec.709 Gamma 2.4, sRGB})
@@ -626,77 +626,226 @@ __DEVICE__ float cubic_spline_interpolate(float x, const float curve[][2], int s
 // PRESET CURVE DEFINITIONS
 // ============================================================================
 
-// Sat→Hue curves (saturation 0-1 → hue rotation in degrees)
-__CONSTANT__ float sat_to_hue_NEUTRAL[][2] = {
-    {0.0f, 0.0f},
-    {1.0f, 0.0f}
-};
+// ===== NEUTRAL (Reference/Passthrough) =====
+__CONSTANT__ float sat_to_hue_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
+__CONSTANT__ float lum_to_hue_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}};
+__CONSTANT__ float lum_to_lum_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float red_density_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float green_density_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
+__CONSTANT__ float blue_density_NEUTRAL[][2] = {{0.0f, 0.0f}, {1.0f, 1.0f}};
 
-__CONSTANT__ float sat_to_hue_ICONIC[][2] = {
+// ===== KODAK 5219 VISION3 (Modern Cinematic Negative) =====
+// Characteristics: Warm highlights, rich midtones, slightly cooler shadows, gentle S-curve
+__CONSTANT__ float sat_to_hue_KODAK[][2] = {
     {0.0f, 0.0f},
-    {0.5f, 0.0f},
-    {1.0f, 15.0f}  // Rotate 15 degrees at max saturation (film hue loop)
+    {0.6f, 3.0f},    // Gentle hue loop starts in saturated colors
+    {1.0f, 8.0f}     // Max saturation shifts toward warm
 };
-
-// Lum→Hue curves (luminance 0-1 → hue rotation in degrees)
-__CONSTANT__ float lum_to_hue_NEUTRAL[][2] = {
-    {0.0f, 0.0f},
-    {1.0f, 0.0f}
-};
-
-__CONSTANT__ float lum_to_hue_ICONIC[][2] = {
-    {0.0f, -8.0f},   // Shadows cooler (-8 degrees)
+__CONSTANT__ float lum_to_hue_KODAK[][2] = {
+    {0.0f, -5.0f},   // Shadows slightly cooler (cyan-blue shift)
     {0.18f, 0.0f},   // Middle grey neutral
-    {1.0f, 12.0f}    // Highlights warmer (+12 degrees)
+    {0.7f, 6.0f},    // Upper mids warm up
+    {1.0f, 10.0f}    // Highlights golden/warm
 };
-
-// Lum→Lum curves (input lum → output lum)
-__CONSTANT__ float lum_to_lum_NEUTRAL[][2] = {
+__CONSTANT__ float lum_to_lum_KODAK[][2] = {
     {0.0f, 0.0f},
+    {0.05f, 0.08f},  // Lifted blacks (film fog)
+    {0.18f, 0.21f},  // Midtones slightly lifted
+    {0.6f, 0.65f},   // Gentle S-curve
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float red_density_KODAK[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.48f},   // Cyan dye compresses slightly
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float green_density_KODAK[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.50f},   // Magenta dye neutral
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float blue_density_KODAK[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.52f},   // Yellow dye expands slightly (warmer)
     {1.0f, 1.0f}
 };
 
-__CONSTANT__ float lum_to_lum_ICONIC[][2] = {
+// ===== FUJI ETERNA 500T (Cool Pastel Aesthetic) =====
+// Characteristics: Desaturated highlights, cool shadows, low contrast, pastel midtones
+__CONSTANT__ float sat_to_hue_FUJI[][2] = {
     {0.0f, 0.0f},
-    {0.18f, 0.20f},
-    {0.5f, 0.55f},
+    {0.4f, -4.0f},   // Saturated colors shift cooler (teal direction)
+    {1.0f, -8.0f}    // Max saturation distinctly cooler
+};
+__CONSTANT__ float lum_to_hue_FUJI[][2] = {
+    {0.0f, -12.0f},  // Deep shadows very cool (blue)
+    {0.18f, -3.0f},  // Midtones still slightly cool
+    {0.8f, 2.0f},    // Highlights slightly warm (contrast with shadows)
+    {1.0f, 5.0f}
+};
+__CONSTANT__ float lum_to_lum_FUJI[][2] = {
+    {0.0f, 0.02f},   // Lifted blacks (milky look)
+    {0.18f, 0.22f},  // Midtones lifted (low contrast)
+    {0.7f, 0.72f},   // Gentle rolloff in highlights
+    {1.0f, 0.96f}    // Compressed whites (pastel)
+};
+__CONSTANT__ float red_density_FUJI[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.52f},   // Cyan dye expands (more cyan = cooler)
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float green_density_FUJI[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.48f},   // Magenta dye compresses (less magenta = more green)
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float blue_density_FUJI[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.50f},   // Yellow dye neutral
     {1.0f, 1.0f}
 };
 
-// RGB Density curves (per-channel film dye layer response)
-// Red channel (Cyan dye layer)
-__CONSTANT__ float red_density_NEUTRAL[][2] = {
+// ===== EKTACHROME E100 (Vibrant Slide Film) =====
+// Characteristics: Punchy contrast, saturated primaries, cool shadows, warm highlights, rich blues
+__CONSTANT__ float sat_to_hue_EKTAR[][2] = {
     {0.0f, 0.0f},
+    {0.5f, 5.0f},    // Strong hue loop
+    {1.0f, 18.0f}    // Max saturation shifts dramatically
+};
+__CONSTANT__ float lum_to_hue_EKTAR[][2] = {
+    {0.0f, -10.0f},  // Shadows cool (rich blues)
+    {0.18f, 0.0f},   // Midtones neutral
+    {0.6f, 8.0f},    // Highlights warm up quickly
+    {1.0f, 15.0f}    // Very warm highlights
+};
+__CONSTANT__ float lum_to_lum_EKTAR[][2] = {
+    {0.0f, 0.0f},    // Deep blacks (slide film)
+    {0.18f, 0.16f},  // Midtones compressed (high contrast)
+    {0.6f, 0.68f},   // Strong S-curve
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float red_density_EKTAR[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.46f},   // Cyan dye compresses (less cyan = more red punch)
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float green_density_EKTAR[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.51f},   // Magenta dye slight expansion
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float blue_density_EKTAR[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.54f},   // Yellow dye expands (rich blues, warm yellows)
     {1.0f, 1.0f}
 };
 
-__CONSTANT__ float red_density_ICONIC[][2] = {
+// ===== AGFA XTR 100 (Vintage Low Saturation) =====
+// Characteristics: Muted colors, green cast, low contrast, gentle rolloff
+__CONSTANT__ float sat_to_hue_AGFA[][2] = {
     {0.0f, 0.0f},
-    {0.5f, 0.48f},
+    {0.5f, -3.0f},   // Subtle shift toward green
+    {1.0f, -6.0f}
+};
+__CONSTANT__ float lum_to_hue_AGFA[][2] = {
+    {0.0f, 2.0f},    // Shadows slightly greenish
+    {0.18f, 1.0f},   // Midtones slightly green
+    {0.8f, -2.0f},   // Highlights shift away from green
+    {1.0f, -4.0f}
+};
+__CONSTANT__ float lum_to_lum_AGFA[][2] = {
+    {0.0f, 0.04f},   // Very lifted blacks (vintage fog)
+    {0.18f, 0.24f},  // Low contrast midtones
+    {0.7f, 0.74f},   // Gentle compression
+    {1.0f, 0.94f}    // Rolled off highlights
+};
+__CONSTANT__ float red_density_AGFA[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.49f},   // Cyan dye slight compression
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float green_density_AGFA[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.52f},   // Magenta dye expands (green cast)
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float blue_density_AGFA[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.48f},   // Yellow dye compresses (cooler)
     {1.0f, 1.0f}
 };
 
-// Green channel (Magenta dye layer)
-__CONSTANT__ float green_density_NEUTRAL[][2] = {
+// ===== TEAL & ORANGE (Modern Blockbuster) =====
+// Characteristics: Strong teal in shadows/cyans, strong orange in highlights/skin, high contrast
+__CONSTANT__ float sat_to_hue_TEAL[][2] = {
     {0.0f, 0.0f},
+    {0.3f, -15.0f},  // Low saturation shifts toward teal
+    {0.7f, 10.0f},   // Mid saturation shifts toward orange
+    {1.0f, 5.0f}     // High saturation slight warm
+};
+__CONSTANT__ float lum_to_hue_TEAL[][2] = {
+    {0.0f, -20.0f},  // Shadows very teal/cyan
+    {0.18f, -8.0f},  // Midtones still teal
+    {0.5f, 0.0f},    // Transition point
+    {0.75f, 12.0f},  // Upper mids orange
+    {1.0f, 18.0f}    // Highlights very orange
+};
+__CONSTANT__ float lum_to_lum_TEAL[][2] = {
+    {0.0f, 0.0f},    // Crushed blacks
+    {0.18f, 0.15f},  // Strong contrast
+    {0.6f, 0.72f},   // Aggressive S-curve
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float red_density_TEAL[][2] = {
+    {0.0f, 0.0f},
+    {0.3f, 0.26f},   // Shadows compressed (more cyan)
+    {0.7f, 0.75f},   // Highlights expanded (more red/orange)
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float green_density_TEAL[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.48f},   // Slight compression overall
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float blue_density_TEAL[][2] = {
+    {0.0f, 0.0f},
+    {0.3f, 0.35f},   // Shadows expanded (more blue/teal)
+    {0.7f, 0.68f},   // Highlights compressed (less blue = warmer)
     {1.0f, 1.0f}
 };
 
-__CONSTANT__ float green_density_ICONIC[][2] = {
+// ===== BLEACH BYPASS (Desaturated High Contrast) =====
+// Characteristics: Low saturation, crushed blacks, blown highlights, cooler overall, gritty
+__CONSTANT__ float sat_to_hue_BLEACH[][2] = {
     {0.0f, 0.0f},
-    {0.5f, 0.50f},
+    {0.5f, -8.0f},   // Saturated colors shift cooler
+    {1.0f, -15.0f}   // Strong cool shift (silver retention effect)
+};
+__CONSTANT__ float lum_to_hue_BLEACH[][2] = {
+    {0.0f, -6.0f},   // Shadows cool
+    {0.18f, -4.0f},  // Midtones cool
+    {1.0f, -2.0f}    // Highlights less cool but still present
+};
+__CONSTANT__ float lum_to_lum_BLEACH[][2] = {
+    {0.0f, 0.0f},    // Deep blacks
+    {0.1f, 0.05f},   // Crushed shadows
+    {0.18f, 0.14f},  // High contrast midtones
+    {0.7f, 0.8f},    // Blown highlights start early
     {1.0f, 1.0f}
 };
-
-// Blue channel (Yellow dye layer)
-__CONSTANT__ float blue_density_NEUTRAL[][2] = {
+__CONSTANT__ float red_density_BLEACH[][2] = {
     {0.0f, 0.0f},
+    {0.5f, 0.46f},   // Compressed (less saturation overall)
     {1.0f, 1.0f}
 };
-
-__CONSTANT__ float blue_density_ICONIC[][2] = {
+__CONSTANT__ float green_density_BLEACH[][2] = {
     {0.0f, 0.0f},
-    {0.5f, 0.52f},
+    {0.5f, 0.47f},   // Compressed
+    {1.0f, 1.0f}
+};
+__CONSTANT__ float blue_density_BLEACH[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.51f},   // Slight expansion (cooler overall)
     {1.0f, 1.0f}
 };
 
@@ -756,13 +905,48 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         red_density = red_density_NEUTRAL; red_density_size = 2;
         green_density = green_density_NEUTRAL; green_density_size = 2;
         blue_density = blue_density_NEUTRAL; blue_density_size = 2;
-    } else { // ICONIC_FILM
-        sat_to_hue = sat_to_hue_ICONIC; sat_to_hue_size = 3;
-        lum_to_hue = lum_to_hue_ICONIC; lum_to_hue_size = 3;
-        lum_to_lum = lum_to_lum_ICONIC; lum_to_lum_size = 4;
-        red_density = red_density_ICONIC; red_density_size = 3;
-        green_density = green_density_ICONIC; green_density_size = 3;
-        blue_density = blue_density_ICONIC; blue_density_size = 3;
+    } else if (preset == 1) { // KODAK_5219
+        sat_to_hue = sat_to_hue_KODAK; sat_to_hue_size = 3;
+        lum_to_hue = lum_to_hue_KODAK; lum_to_hue_size = 4;
+        lum_to_lum = lum_to_lum_KODAK; lum_to_lum_size = 5;
+        red_density = red_density_KODAK; red_density_size = 3;
+        green_density = green_density_KODAK; green_density_size = 3;
+        blue_density = blue_density_KODAK; blue_density_size = 3;
+    } else if (preset == 2) { // FUJI_ETERNA
+        sat_to_hue = sat_to_hue_FUJI; sat_to_hue_size = 3;
+        lum_to_hue = lum_to_hue_FUJI; lum_to_hue_size = 4;
+        lum_to_lum = lum_to_lum_FUJI; lum_to_lum_size = 4;
+        red_density = red_density_FUJI; red_density_size = 3;
+        green_density = green_density_FUJI; green_density_size = 3;
+        blue_density = blue_density_FUJI; blue_density_size = 3;
+    } else if (preset == 3) { // EKTACHROME
+        sat_to_hue = sat_to_hue_EKTAR; sat_to_hue_size = 3;
+        lum_to_hue = lum_to_hue_EKTAR; lum_to_hue_size = 4;
+        lum_to_lum = lum_to_lum_EKTAR; lum_to_lum_size = 4;
+        red_density = red_density_EKTAR; red_density_size = 3;
+        green_density = green_density_EKTAR; green_density_size = 3;
+        blue_density = blue_density_EKTAR; blue_density_size = 3;
+    } else if (preset == 4) { // AGFA_XTR
+        sat_to_hue = sat_to_hue_AGFA; sat_to_hue_size = 3;
+        lum_to_hue = lum_to_hue_AGFA; lum_to_hue_size = 4;
+        lum_to_lum = lum_to_lum_AGFA; lum_to_lum_size = 4;
+        red_density = red_density_AGFA; red_density_size = 3;
+        green_density = green_density_AGFA; green_density_size = 3;
+        blue_density = blue_density_AGFA; blue_density_size = 3;
+    } else if (preset == 5) { // TEAL_ORANGE
+        sat_to_hue = sat_to_hue_TEAL; sat_to_hue_size = 4;
+        lum_to_hue = lum_to_hue_TEAL; lum_to_hue_size = 5;
+        lum_to_lum = lum_to_lum_TEAL; lum_to_lum_size = 4;
+        red_density = red_density_TEAL; red_density_size = 4;
+        green_density = green_density_TEAL; green_density_size = 3;
+        blue_density = blue_density_TEAL; blue_density_size = 4;
+    } else { // BLEACH_BYPASS
+        sat_to_hue = sat_to_hue_BLEACH; sat_to_hue_size = 3;
+        lum_to_hue = lum_to_hue_BLEACH; lum_to_hue_size = 3;
+        lum_to_lum = lum_to_lum_BLEACH; lum_to_lum_size = 5;
+        red_density = red_density_BLEACH; red_density_size = 3;
+        green_density = green_density_BLEACH; green_density_size = 3;
+        blue_density = blue_density_BLEACH; blue_density_size = 3;
     }
 
     // ========================================================================
