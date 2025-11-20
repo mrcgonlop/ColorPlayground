@@ -75,6 +75,17 @@ DEFINE_UI_PARAMS(overall_hue_r, Overall Hue R, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0
 DEFINE_UI_PARAMS(overall_hue_g, Overall Hue G, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
 DEFINE_UI_PARAMS(overall_hue_b, Overall Hue B, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
 
+// Highlight RGB Hue Rotation (JP_2499 style - affects bright values only)
+DEFINE_UI_PARAMS(enable_highlight_hue, Enable Highlight Hue Rotation, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(highlight_hue_r, Highlight Hue R, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(highlight_hue_g, Highlight Hue G, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(highlight_hue_b, Highlight Hue B, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+
+// Advanced Features (JP_2499 inspired)
+DEFINE_UI_PARAMS(enable_energy_correction, Enable Energy Correction, DCTLUI_CHECK_BOX, 1)
+DEFINE_UI_PARAMS(enable_inverted_gamut, Enable Inverted Gamut Pass, DCTLUI_CHECK_BOX, 1)
+DEFINE_UI_PARAMS(use_moment_saturation, Use Moment Space Saturation, DCTLUI_CHECK_BOX, 0)
+
 // Per-Hue-Zone Sat->Hue (CMY - Film Negative Primaries)
 DEFINE_UI_PARAMS(enable_hue_zone_sat_cmy, Enable CMY Sat-Hue, DCTLUI_CHECK_BOX, 0)
 DEFINE_UI_PARAMS(sat_hue_cyan, Sat-Hue Cyan deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
@@ -372,6 +383,44 @@ __DEVICE__ inline float3x3 simpleHueMatrix(float red, float green, float blue) {
     bluecoeff = bluecoeff / white.z;
 
     return make_float3x3(redcoeff, greencoeff, bluecoeff);
+}
+
+// Luminance mask for highlight selection (JP_2499 style)
+__DEVICE__ inline float lumMask(float3 rgb, float redw, float greenw, float bluew) {
+    float3 weights = make_float3(redw, greenw, bluew);
+    weights.x *= rgb.x;
+    weights.y *= rgb.y;
+    weights.z *= rgb.z;
+    float lum = weights.x + weights.y + weights.z;
+
+    // Sigmoid-based mask that selects bright areas
+    lum = _powf((lum / (lum + 1.16820931127f)), 1.1f);
+    lum = lum * lum / (lum + 0.01f);
+    lum = _powf(lum, 2.5f) * (1.0f - lum) + lum * lum;
+
+    return lum;
+}
+
+// McAdams moment space saturation calculation (more perceptually accurate)
+__DEVICE__ inline float satmask(float3 rgb) {
+    const float PI_LOCAL = 3.14159265359f;
+
+    // Inset matrix for better chromatic handling
+    float3x3 inset = simpleInsetMatrix(0.1f, 0.7f, 0.2f, 0);
+    rgb = vdot(inset, rgb);
+
+    float avg = (rgb.x + rgb.y + rgb.z) / 3.0f;
+
+    // McAdams moment calculation
+    float hue_angle = _atan2f(0.5f * (2.0f * rgb.x - rgb.y - rgb.z),
+                              (rgb.y - rgb.z) * _sqrtf(3.0f / 4.0f));
+
+    float saturation = avg == 0.0f ? 0.0f :
+        _sqrtf((rgb.x - avg) * (rgb.x - avg) +
+               (rgb.y - avg) * (rgb.y - avg) +
+               (rgb.z - avg) * (rgb.z - avg)) / (2.0f * avg);
+
+    return saturation;
 }
 
 // ============================================================================
@@ -702,7 +751,9 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     if (enable_gamut_compression) {
         float3 rgb_copy = rgb;
         rgb = NonLinearGamutMappingPerChannel(rgb, gamut_compress_r, gamut_compress_g, gamut_compress_b, 0.0f, 1.0f);
-        rgb = EnergyCorrection(rgb_copy, rgb, matrix_rec709_to_xyz);
+        if (enable_energy_correction) {
+            rgb = EnergyCorrection(rgb_copy, rgb, matrix_rec709_to_xyz);
+        }
     }
 
     // ========================================================================
@@ -712,7 +763,9 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         float3 rgb_copy = rgb;
         float3x3 ct_matrix = crosstalkMatrix(crosstalk_rg, crosstalk_rb, crosstalk_gr, crosstalk_gb, crosstalk_br, crosstalk_bg);
         rgb = vdot(ct_matrix, rgb);
-        rgb = EnergyCorrection(rgb_copy, rgb, matrix_rec709_to_xyz);
+        if (enable_energy_correction) {
+            rgb = EnergyCorrection(rgb_copy, rgb, matrix_rec709_to_xyz);
+        }
     }
 
     // ========================================================================
@@ -722,7 +775,35 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         float3 rgb_copy = rgb;
         float3x3 hue_matrix = simpleHueMatrix(overall_hue_r, overall_hue_g, overall_hue_b);
         rgb = vdot(hue_matrix, rgb);
-        rgb = EnergyCorrection(rgb_copy, rgb, matrix_rec709_to_xyz);
+        if (enable_energy_correction) {
+            rgb = EnergyCorrection(rgb_copy, rgb, matrix_rec709_to_xyz);
+        }
+    }
+
+    // ========================================================================
+    // 4d. HIGHLIGHT RGB HUE ROTATION (JP_2499 style - luminance masked)
+    // ========================================================================
+    if (enable_highlight_hue) {
+        float3 rgb_copy = rgb;
+
+        // Calculate luminance mask (0-1, where 1 = bright highlights)
+        float3 weights = avgweights(matrix_rec709_to_xyz);
+        float lum = lumMask(rgb, weights.x, weights.y, weights.z);
+
+        // Apply highlight hue matrix
+        float3x3 highlight_hue_matrix = simpleHueMatrix(highlight_hue_r, highlight_hue_g, highlight_hue_b);
+        float3 rgb_rotated = vdot(highlight_hue_matrix, rgb);
+
+        // Blend based on luminance mask
+        rgb = make_float3(
+            rgb.x * (1.0f - lum) + rgb_rotated.x * lum,
+            rgb.y * (1.0f - lum) + rgb_rotated.y * lum,
+            rgb.z * (1.0f - lum) + rgb_rotated.z * lum
+        );
+
+        if (enable_energy_correction) {
+            rgb = EnergyCorrection(rgb_copy, rgb, matrix_rec709_to_xyz);
+        }
     }
 
     // ========================================================================
@@ -733,8 +814,15 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     float2 opp = opponent(rgb);
     float lum = (rgb.x + rgb.y + rgb.z) / 3.0f;  // Simple luminance
 
-    // Calculate saturation (achromatic distance)
-    float sat = achromatic_distance(opp);
+    // Calculate saturation (achromatic distance or moment space)
+    float sat;
+    if (use_moment_saturation) {
+        // McAdams moment space saturation (more perceptually accurate)
+        sat = satmask(rgb);
+    } else {
+        // Simple opponent space saturation
+        sat = achromatic_distance(opp);
+    }
 
     // Get hue zone weights (CMY - film negative primaries, RGB - additive primaries)
     float3 hue_weights_cmy = get_hue_zone_weights_cmy(opp);
@@ -897,15 +985,21 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     // ========================================================================
     float3 rgb_copy = rgb;
     rgb = NonLinearGamutMapping(rgb, 0.01f, 0.0f, 1.0f);
-    rgb = EnergyCorrection(rgb_copy, rgb, matrix_rec709_to_xyz);
+    if (enable_energy_correction) {
+        rgb = EnergyCorrection(rgb_copy, rgb, matrix_rec709_to_xyz);
+    }
     rgb = maxf3(0.0f, rgb);
 
-    // Compress inverted values (for smooth rolloff near white)
-    float3 linear_inv = make_float3(1.0f, 1.0f, 1.0f) - rgb;
-    rgb_copy = linear_inv;
-    linear_inv = NonLinearGamutMapping(linear_inv, 0.01f, 0.0f, 1.0f);
-    linear_inv = EnergyCorrection(rgb_copy, linear_inv, matrix_rec709_to_xyz);
-    rgb = make_float3(1.0f, 1.0f, 1.0f) - linear_inv;
+    // Compress inverted values (for smooth rolloff near white and negatives)
+    if (enable_inverted_gamut) {
+        float3 linear_inv = make_float3(1.0f, 1.0f, 1.0f) - rgb;
+        rgb_copy = linear_inv;
+        linear_inv = NonLinearGamutMapping(linear_inv, 0.01f, 0.0f, 1.0f);
+        if (enable_energy_correction) {
+            linear_inv = EnergyCorrection(rgb_copy, linear_inv, matrix_rec709_to_xyz);
+        }
+        rgb = make_float3(1.0f, 1.0f, 1.0f) - linear_inv;
+    }
 
     // ========================================================================
     // 13. OUTPUT GAMMA ENCODING
