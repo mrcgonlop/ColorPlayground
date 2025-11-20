@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FilmGrade Curve Editor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e1e1e;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #ffffff;
+        }
+
+        .main-layout {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .curves-container {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+        }
+
+        .visualizations-container {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+        }
+
+        .curve-editor {
+            background: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .curve-editor h2 {
+            margin-bottom: 15px;
+            color: #4fc3f7;
+            font-size: 18px;
+        }
+
+        .curve-info {
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #b0b0b0;
+        }
+
+        canvas {
+            width: 100%;
+            background: #1a1a1a;
+            border-radius: 4px;
+            cursor: crosshair;
+            display: block;
+        }
+
+        .curve-canvas {
+            height: 300px;
+        }
+
+        .vectorscope-canvas {
+            height: 400px;
+        }
+
+        .preview-canvas {
+            height: 80px;
+            cursor: default;
+        }
+
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .preset-controls {
+            margin-bottom: 15px;
+        }
+
+        .preset-controls select {
+            background: #1a1a1a;
+            color: #e0e0e0;
+            border: 1px solid #3d3d3d;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            min-width: 200px;
+        }
+
+        button {
+            background: #4fc3f7;
+            color: #1e1e1e;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #6dd5ff;
+        }
+
+        button.danger {
+            background: #e57373;
+        }
+
+        button.danger:hover {
+            background: #ef5350;
+        }
+
+        button.secondary {
+            background: #666666;
+        }
+
+        button.secondary:hover {
+            background: #777777;
+        }
+
+        .point-editor {
+            margin-top: 15px;
+            background: #1a1a1a;
+            border-radius: 4px;
+            padding: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .point-editor h3 {
+            color: #4fc3f7;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .point-row {
+            display: grid;
+            grid-template-columns: auto 1fr 1fr auto;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 8px;
+            padding: 8px;
+            background: #2d2d2d;
+            border-radius: 4px;
+        }
+
+        .point-row label {
+            font-size: 12px;
+            color: #b0b0b0;
+        }
+
+        .point-row input[type="number"] {
+            background: #1a1a1a;
+            color: #e0e0e0;
+            border: 1px solid #3d3d3d;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            width: 100%;
+        }
+
+        .point-row button {
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+
+        .export-section {
+            background: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            margin-bottom: 30px;
+        }
+
+        .export-section h2 {
+            margin-bottom: 15px;
+            color: #4fc3f7;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            border: 1px solid #3d3d3d;
+            border-radius: 4px;
+            padding: 15px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            resize: vertical;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .instructions {
+            background: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-left: 4px solid #4fc3f7;
+        }
+
+        .instructions h3 {
+            color: #4fc3f7;
+            margin-bottom: 10px;
+        }
+
+        .instructions ul {
+            margin-left: 20px;
+            line-height: 1.8;
+        }
+
+        .instructions li {
+            color: #b0b0b0;
+        }
+
+        .visualization-box {
+            background: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .visualization-box h2 {
+            margin-bottom: 15px;
+            color: #4fc3f7;
+            font-size: 18px;
+        }
+
+        .visualization-box p {
+            font-size: 12px;
+            color: #b0b0b0;
+            margin-bottom: 10px;
+        }
+
+        .gradient-preview {
+            margin-top: 15px;
+        }
+
+        .gradient-preview h3 {
+            font-size: 14px;
+            color: #4fc3f7;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>FilmGrade Curve Editor</h1>
+
+        <div class="instructions">
+            <h3>How to Use</h3>
+            <ul>
+                <li><strong>Click</strong> on canvas to add control points</li>
+                <li><strong>Drag</strong> points to adjust curve shape</li>
+                <li><strong>Edit numbers</strong> in point editor for precise control</li>
+                <li><strong>Right-click</strong> on a point to delete it</li>
+                <li><strong>Load presets</strong> for common film looks</li>
+                <li><strong>Vectorscopes</strong> show hue transformations in real-time</li>
+                <li><strong>Export DCTL</strong> generates code to paste into FilmGrade.dctl</li>
+            </ul>
+        </div>
+
+        <div class="main-layout">
+            <div class="curves-container">
+                <!-- Sat to Hue Curve -->
+                <div class="curve-editor">
+                    <h2>Sat → Hue</h2>
+                    <div class="curve-info">X: Saturation (0.0 - 1.0) | Y: Hue Shift (degrees)</div>
+
+                    <div class="preset-controls">
+                        <select id="sat-to-hue-preset" onchange="loadPreset('sat-to-hue', this.value)">
+                            <option value="">-- Load Preset --</option>
+                            <option value="cross-process">Cross-Process</option>
+                            <option value="bleach-bypass">Bleach Bypass</option>
+                            <option value="teal-orange">Teal-Orange</option>
+                            <option value="warm-shift">Warm Shift</option>
+                            <option value="cool-shift">Cool Shift</option>
+                        </select>
+                    </div>
+
+                    <canvas id="sat-to-hue-canvas" class="curve-canvas" width="800" height="600"></canvas>
+
+                    <div class="gradient-preview">
+                        <h3>Preview: Hue Ring Transformation</h3>
+                        <canvas id="sat-to-hue-preview" class="preview-canvas" width="800" height="160"></canvas>
+                    </div>
+
+                    <div class="controls">
+                        <button onclick="addPoint('sat-to-hue', 0.5, 0)">Add Point (0.5, 0)</button>
+                        <button onclick="clearCurve('sat-to-hue')">Clear Curve</button>
+                        <button onclick="resetCurve('sat-to-hue')">Reset to Linear</button>
+                    </div>
+
+                    <div class="point-editor" id="sat-to-hue-points"></div>
+                </div>
+
+                <!-- Lum to Hue Curve -->
+                <div class="curve-editor">
+                    <h2>Lum → Hue</h2>
+                    <div class="curve-info">X: Luminance (0.0 - 1.0) | Y: Hue Shift (degrees)</div>
+
+                    <div class="preset-controls">
+                        <select id="lum-to-hue-preset" onchange="loadPreset('lum-to-hue', this.value)">
+                            <option value="">-- Load Preset --</option>
+                            <option value="shadow-blue">Shadow Blue Shift</option>
+                            <option value="highlight-warm">Highlight Warm</option>
+                            <option value="split-tone">Split Tone</option>
+                            <option value="vintage">Vintage Film</option>
+                        </select>
+                    </div>
+
+                    <canvas id="lum-to-hue-canvas" class="curve-canvas" width="800" height="600"></canvas>
+
+                    <div class="gradient-preview">
+                        <h3>Preview: Luminance to Hue Shift</h3>
+                        <canvas id="lum-to-hue-preview" class="preview-canvas" width="800" height="160"></canvas>
+                    </div>
+
+                    <div class="controls">
+                        <button onclick="addPoint('lum-to-hue', 0.5, 0)">Add Point (0.5, 0)</button>
+                        <button onclick="clearCurve('lum-to-hue')">Clear Curve</button>
+                        <button onclick="resetCurve('lum-to-hue')">Reset to Linear</button>
+                    </div>
+
+                    <div class="point-editor" id="lum-to-hue-points"></div>
+                </div>
+
+                <!-- Lum to Lum Curve -->
+                <div class="curve-editor">
+                    <h2>Lum → Lum</h2>
+                    <div class="curve-info">X: Input Luminance (0.0 - 1.0) | Y: Output Luminance (0.0 - 1.0)</div>
+
+                    <div class="preset-controls">
+                        <select id="lum-to-lum-preset" onchange="loadPreset('lum-to-lum', this.value)">
+                            <option value="">-- Load Preset --</option>
+                            <option value="s-curve">S-Curve (Film Contrast)</option>
+                            <option value="soft-contrast">Soft Contrast</option>
+                            <option value="hard-contrast">Hard Contrast</option>
+                            <option value="lifted-blacks">Lifted Blacks</option>
+                            <option value="crushed-blacks">Crushed Blacks</option>
+                        </select>
+                    </div>
+
+                    <canvas id="lum-to-lum-canvas" class="curve-canvas" width="800" height="600"></canvas>
+
+                    <div class="gradient-preview">
+                        <h3>Preview: Tone Response</h3>
+                        <canvas id="lum-to-lum-preview" class="preview-canvas" width="800" height="160"></canvas>
+                    </div>
+
+                    <div class="controls">
+                        <button onclick="addPoint('lum-to-lum', 0.5, 0.5)">Add Point (0.5, 0.5)</button>
+                        <button onclick="clearCurve('lum-to-lum')">Clear Curve</button>
+                        <button onclick="resetCurve('lum-to-lum')">Reset to Linear</button>
+                    </div>
+
+                    <div class="point-editor" id="lum-to-lum-points"></div>
+                </div>
+            </div>
+
+            <!-- Visualizations Column -->
+            <div class="visualizations-container">
+                <!-- Sat to Hue Vectorscope -->
+                <div class="visualization-box">
+                    <h2>Sat → Hue Vectorscope</h2>
+                    <p>Shows how saturation affects hue rotation. Outer ring = high saturation, inner ring = low saturation.</p>
+                    <canvas id="sat-vectorscope" class="vectorscope-canvas" width="600" height="600"></canvas>
+                </div>
+
+                <!-- Lum to Hue Vectorscope -->
+                <div class="visualization-box">
+                    <h2>Lum → Hue Vectorscope</h2>
+                    <p>Shows how luminance affects hue rotation. Outer ring = bright, inner ring = dark.</p>
+                    <canvas id="lum-vectorscope" class="vectorscope-canvas" width="600" height="600"></canvas>
+                </div>
+
+                <!-- Combined Hue Wheel -->
+                <div class="visualization-box">
+                    <h2>Combined Hue Transformation</h2>
+                    <p>Visual representation of final hue mapping after both Sat→Hue and Lum→Hue.</p>
+                    <canvas id="combined-hue-wheel" class="vectorscope-canvas" width="600" height="600"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="export-section">
+            <h2>Export / Import</h2>
+            <textarea id="export-output" readonly placeholder="Click 'Generate DCTL Code' to export your curves..."></textarea>
+            <div class="button-group">
+                <button onclick="generateDCTL()">Generate DCTL Code</button>
+                <button onclick="copyToClipboard()">Copy to Clipboard</button>
+                <button onclick="importFromDCTL()">Import from DCTL</button>
+                <button class="secondary" onclick="saveToJSON()">Save Configuration (JSON)</button>
+                <button class="secondary" onclick="loadFromJSON()">Load Configuration (JSON)</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Curve data storage
+        const curves = {
+            'sat-to-hue': {
+                points: [{x: 0, y: 0}, {x: 1, y: 0}],
+                yRange: [-30, 30],
+                name: 'Sat → Hue',
+                varName: 'sat_to_hue'
+            },
+            'lum-to-hue': {
+                points: [{x: 0, y: 0}, {x: 1, y: 0}],
+                yRange: [-30, 30],
+                name: 'Lum → Hue',
+                varName: 'lum_to_hue'
+            },
+            'lum-to-lum': {
+                points: [{x: 0, y: 0}, {x: 1, y: 1}],
+                yRange: [0, 1],
+                name: 'Lum → Lum',
+                varName: 'lum_to_lum'
+            }
+        };
+
+        const presets = {
+            'sat-to-hue': {
+                'cross-process': [{x: 0, y: 0}, {x: 0.3, y: -8}, {x: 0.7, y: 12}, {x: 1, y: -5}],
+                'bleach-bypass': [{x: 0, y: 0}, {x: 0.5, y: -15}, {x: 1, y: -10}],
+                'teal-orange': [{x: 0, y: 0}, {x: 0.4, y: 15}, {x: 0.7, y: -12}, {x: 1, y: 8}],
+                'warm-shift': [{x: 0, y: 0}, {x: 0.5, y: 10}, {x: 1, y: 15}],
+                'cool-shift': [{x: 0, y: 0}, {x: 0.5, y: -10}, {x: 1, y: -15}]
+            },
+            'lum-to-hue': {
+                'shadow-blue': [{x: 0, y: -15}, {x: 0.3, y: -5}, {x: 0.7, y: 0}, {x: 1, y: 0}],
+                'highlight-warm': [{x: 0, y: 0}, {x: 0.3, y: 0}, {x: 0.7, y: 5}, {x: 1, y: 12}],
+                'split-tone': [{x: 0, y: -12}, {x: 0.5, y: 0}, {x: 1, y: 15}],
+                'vintage': [{x: 0, y: 8}, {x: 0.4, y: -5}, {x: 0.8, y: 10}, {x: 1, y: 12}]
+            },
+            'lum-to-lum': {
+                's-curve': [{x: 0, y: 0}, {x: 0.25, y: 0.18}, {x: 0.5, y: 0.5}, {x: 0.75, y: 0.82}, {x: 1, y: 1}],
+                'soft-contrast': [{x: 0, y: 0}, {x: 0.5, y: 0.48}, {x: 1, y: 1}],
+                'hard-contrast': [{x: 0, y: 0}, {x: 0.5, y: 0.52}, {x: 1, y: 1}],
+                'lifted-blacks': [{x: 0, y: 0.15}, {x: 0.5, y: 0.5}, {x: 1, y: 1}],
+                'crushed-blacks': [{x: 0, y: 0}, {x: 0.2, y: 0.05}, {x: 0.5, y: 0.5}, {x: 1, y: 1}]
+            }
+        };
+
+        let selectedPoint = null;
+        let activeCanvas = null;
+
+        // Initialize canvases
+        function initCanvas(canvasId, curveKey) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+
+            // Mouse events
+            canvas.addEventListener('mousedown', (e) => handleMouseDown(e, canvas, curveKey));
+            canvas.addEventListener('mousemove', (e) => handleMouseMove(e, canvas, curveKey));
+            canvas.addEventListener('mouseup', (e) => handleMouseUp(e, canvas, curveKey));
+            canvas.addEventListener('contextmenu', (e) => handleRightClick(e, canvas, curveKey));
+            canvas.addEventListener('mouseleave', () => {
+                selectedPoint = null;
+                activeCanvas = null;
+            });
+
+            drawCurve(canvas, curveKey);
+            updatePointEditor(curveKey);
+        }
+
+        // Convert canvas coordinates to curve coordinates
+        function canvasToCurve(canvas, x, y, curveKey) {
+            const rect = canvas.getBoundingClientRect();
+            const canvasX = (x - rect.left) * (canvas.width / rect.width);
+            const canvasY = (y - rect.top) * (canvas.height / rect.height);
+
+            const padding = 60;
+            const plotWidth = canvas.width - 2 * padding;
+            const plotHeight = canvas.height - 2 * padding;
+
+            const curve = curves[curveKey];
+            const curveX = (canvasX - padding) / plotWidth;
+            const curveY = curve.yRange[0] + (1 - (canvasY - padding) / plotHeight) * (curve.yRange[1] - curve.yRange[0]);
+
+            return {
+                x: Math.max(0, Math.min(1, curveX)),
+                y: Math.max(curve.yRange[0], Math.min(curve.yRange[1], curveY))
+            };
+        }
+
+        // Convert curve coordinates to canvas coordinates
+        function curveToCanvas(canvas, point, curveKey) {
+            const padding = 60;
+            const plotWidth = canvas.width - 2 * padding;
+            const plotHeight = canvas.height - 2 * padding;
+
+            const curve = curves[curveKey];
+            const canvasX = padding + point.x * plotWidth;
+            const canvasY = padding + (1 - (point.y - curve.yRange[0]) / (curve.yRange[1] - curve.yRange[0])) * plotHeight;
+
+            return { x: canvasX, y: canvasY };
+        }
+
+        // Draw curve on canvas
+        function drawCurve(canvas, curveKey) {
+            const ctx = canvas.getContext('2d');
+            const curve = curves[curveKey];
+            const padding = 60;
+            const plotWidth = canvas.width - 2 * padding;
+            const plotHeight = canvas.height - 2 * padding;
+
+            // Clear canvas
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw grid
+            ctx.strokeStyle = '#333333';
+            ctx.lineWidth = 1;
+
+            // Vertical grid lines
+            for (let i = 0; i <= 10; i++) {
+                const x = padding + (i / 10) * plotWidth;
+                ctx.beginPath();
+                ctx.moveTo(x, padding);
+                ctx.lineTo(x, padding + plotHeight);
+                ctx.stroke();
+            }
+
+            // Horizontal grid lines
+            const ySteps = 10;
+            for (let i = 0; i <= ySteps; i++) {
+                const y = padding + (i / ySteps) * plotHeight;
+                ctx.beginPath();
+                ctx.moveTo(padding, y);
+                ctx.lineTo(padding + plotWidth, y);
+                ctx.stroke();
+            }
+
+            // Draw axes
+            ctx.strokeStyle = '#666666';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(padding, padding, plotWidth, plotHeight);
+
+            // Draw zero line (for hue curves)
+            if (curve.yRange[0] < 0 && curve.yRange[1] > 0) {
+                const zeroY = padding + (1 - (0 - curve.yRange[0]) / (curve.yRange[1] - curve.yRange[0])) * plotHeight;
+                ctx.strokeStyle = '#555555';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(padding, zeroY);
+                ctx.lineTo(padding + plotWidth, zeroY);
+                ctx.stroke();
+            }
+
+            // Draw labels
+            ctx.fillStyle = '#b0b0b0';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+
+            // X-axis labels
+            for (let i = 0; i <= 10; i += 2) {
+                const x = padding + (i / 10) * plotWidth;
+                ctx.fillText((i / 10).toFixed(1), x, canvas.height - 20);
+            }
+
+            // Y-axis labels
+            ctx.textAlign = 'right';
+            for (let i = 0; i <= 4; i++) {
+                const y = padding + (i / 4) * plotHeight;
+                const value = curve.yRange[1] - (i / 4) * (curve.yRange[1] - curve.yRange[0]);
+                ctx.fillText(value.toFixed(1), padding - 10, y + 5);
+            }
+
+            // Sort points by x
+            curve.points.sort((a, b) => a.x - b.x);
+
+            // Draw curve using cubic spline
+            if (curve.points.length >= 2) {
+                ctx.strokeStyle = '#4fc3f7';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+
+                for (let i = 0; i <= 200; i++) {
+                    const x = i / 200;
+                    const y = cubicSplineInterpolate(x, curve.points);
+                    const canvasPos = curveToCanvas(canvas, {x, y}, curveKey);
+
+                    if (i === 0) {
+                        ctx.moveTo(canvasPos.x, canvasPos.y);
+                    } else {
+                        ctx.lineTo(canvasPos.x, canvasPos.y);
+                    }
+                }
+
+                ctx.stroke();
+            }
+
+            // Draw control points
+            curve.points.forEach((point, index) => {
+                const canvasPos = curveToCanvas(canvas, point, curveKey);
+
+                ctx.fillStyle = '#4fc3f7';
+                ctx.beginPath();
+                ctx.arc(canvasPos.x, canvasPos.y, 8, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.strokeStyle = '#1e1e1e';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
+        }
+
+        // Cubic spline interpolation (matches DCTL implementation)
+        function cubicSplineInterpolate(x, points) {
+            if (points.length === 0) return 0;
+            if (points.length === 1) return points[0].y;
+            if (x <= points[0].x) return points[0].y;
+            if (x >= points[points.length - 1].x) return points[points.length - 1].y;
+
+            // Find segment
+            let i = 0;
+            for (i = 0; i < points.length - 1; i++) {
+                if (x >= points[i].x && x <= points[i + 1].x) break;
+            }
+
+            const x0 = points[i].x;
+            const x1 = points[i + 1].x;
+            const y0 = points[i].y;
+            const y1 = points[i + 1].y;
+
+            // Estimate derivatives using neighboring points
+            let m0, m1;
+
+            if (i === 0) {
+                m0 = (y1 - y0) / (x1 - x0);
+            } else {
+                const x_prev = points[i - 1].x;
+                const y_prev = points[i - 1].y;
+                m0 = ((y1 - y0) / (x1 - x0) + (y0 - y_prev) / (x0 - x_prev)) / 2;
+            }
+
+            if (i === points.length - 2) {
+                m1 = (y1 - y0) / (x1 - x0);
+            } else {
+                const x_next = points[i + 2].x;
+                const y_next = points[i + 2].y;
+                m1 = ((y_next - y1) / (x_next - x1) + (y1 - y0) / (x1 - x0)) / 2;
+            }
+
+            // Hermite basis functions
+            const t = (x - x0) / (x1 - x0);
+            const t2 = t * t;
+            const t3 = t2 * t;
+
+            const h00 = 2 * t3 - 3 * t2 + 1;
+            const h10 = t3 - 2 * t2 + t;
+            const h01 = -2 * t3 + 3 * t2;
+            const h11 = t3 - t2;
+
+            return h00 * y0 + h10 * (x1 - x0) * m0 + h01 * y1 + h11 * (x1 - x0) * m1;
+        }
+
+        // HSL to RGB conversion
+        function hslToRgb(h, s, l) {
+            h = h / 360;
+            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            const p = 2 * l - q;
+
+            const hueToRgb = (p, q, t) => {
+                if (t < 0) t += 1;
+                if (t > 1) t -= 1;
+                if (t < 1/6) return p + (q - p) * 6 * t;
+                if (t < 1/2) return q;
+                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                return p;
+            };
+
+            return {
+                r: Math.round(hueToRgb(p, q, h + 1/3) * 255),
+                g: Math.round(hueToRgb(p, q, h) * 255),
+                b: Math.round(hueToRgb(p, q, h - 1/3) * 255)
+            };
+        }
+
+        // Draw gradient preview
+        function drawGradientPreview(canvasId, curveKey) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const curve = curves[curveKey];
+
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const barHeight = canvas.height / 2;
+            const barY1 = 10;
+            const barY2 = barHeight + 20;
+
+            // Draw before/after comparison
+            for (let i = 0; i < canvas.width; i++) {
+                const x = i / canvas.width;
+
+                if (curveKey === 'lum-to-lum') {
+                    // Luminance curve - show grayscale gradient
+                    const inputLum = Math.round(x * 255);
+                    const outputLum = Math.round(cubicSplineInterpolate(x, curve.points) * 255);
+
+                    ctx.fillStyle = `rgb(${inputLum}, ${inputLum}, ${inputLum})`;
+                    ctx.fillRect(i, barY1, 1, barHeight);
+
+                    ctx.fillStyle = `rgb(${outputLum}, ${outputLum}, ${outputLum})`;
+                    ctx.fillRect(i, barY2, 1, barHeight);
+                } else {
+                    // Hue curves - show hue ring transformation
+                    const inputHue = x * 360;
+                    const hueShift = cubicSplineInterpolate(x, curve.points);
+                    const outputHue = (inputHue + hueShift + 360) % 360;
+
+                    const inputColor = hslToRgb(inputHue, 1, 0.5);
+                    const outputColor = hslToRgb(outputHue, 1, 0.5);
+
+                    ctx.fillStyle = `rgb(${inputColor.r}, ${inputColor.g}, ${inputColor.b})`;
+                    ctx.fillRect(i, barY1, 1, barHeight);
+
+                    ctx.fillStyle = `rgb(${outputColor.r}, ${outputColor.g}, ${outputColor.b})`;
+                    ctx.fillRect(i, barY2, 1, barHeight);
+                }
+            }
+
+            // Labels
+            ctx.fillStyle = '#b0b0b0';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText('Input', 10, barY1 + barHeight / 2);
+            ctx.fillText('Output', 10, barY2 + barHeight / 2);
+        }
+
+        // Draw vectorscope
+        function drawVectorscope(canvasId, curveKey, isCombined = false) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const radius = Math.min(centerX, centerY) - 40;
+
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw concentric circles
+            ctx.strokeStyle = '#333333';
+            ctx.lineWidth = 1;
+            for (let r = radius / 4; r <= radius; r += radius / 4) {
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            // Draw hue lines (every 30 degrees)
+            for (let angle = 0; angle < 360; angle += 30) {
+                const rad = (angle - 90) * Math.PI / 180;
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.lineTo(centerX + radius * Math.cos(rad), centerY + radius * Math.sin(rad));
+                ctx.stroke();
+            }
+
+            // Draw hue ring with transformations
+            const satCurve = curves['sat-to-hue'];
+            const lumCurve = curves['lum-to-hue'];
+
+            for (let angle = 0; angle < 360; angle += 1) {
+                for (let r = 0; r < radius; r += 2) {
+                    const inputHue = angle;
+                    let hueShift = 0;
+
+                    if (curveKey === 'sat-to-hue') {
+                        const sat = r / radius;
+                        hueShift = cubicSplineInterpolate(sat, satCurve.points);
+                    } else if (curveKey === 'lum-to-hue') {
+                        const lum = r / radius;
+                        hueShift = cubicSplineInterpolate(lum, lumCurve.points);
+                    } else if (isCombined) {
+                        const sat = r / radius;
+                        const lum = r / radius;
+                        hueShift = cubicSplineInterpolate(sat, satCurve.points) +
+                                   cubicSplineInterpolate(lum, lumCurve.points);
+                    }
+
+                    const outputHue = (inputHue + hueShift + 360) % 360;
+                    const rad = (outputHue - 90) * Math.PI / 180;
+
+                    const brightness = 0.3 + (r / radius) * 0.7;
+                    const color = hslToRgb(inputHue, 1, brightness);
+
+                    const x = centerX + r * Math.cos(rad);
+                    const y = centerY + r * Math.sin(rad);
+
+                    ctx.fillStyle = `rgb(${color.r}, ${color.g}, ${color.b})`;
+                    ctx.fillRect(x, y, 2, 2);
+                }
+            }
+
+            // Draw labels
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+
+            const labelRadius = radius + 20;
+            const labels = [
+                {angle: 0, text: 'R', color: '#ff0000'},
+                {angle: 60, text: 'Y', color: '#ffff00'},
+                {angle: 120, text: 'G', color: '#00ff00'},
+                {angle: 180, text: 'C', color: '#00ffff'},
+                {angle: 240, text: 'B', color: '#0000ff'},
+                {angle: 300, text: 'M', color: '#ff00ff'}
+            ];
+
+            labels.forEach(label => {
+                const rad = (label.angle - 90) * Math.PI / 180;
+                const x = centerX + labelRadius * Math.cos(rad);
+                const y = centerY + labelRadius * Math.sin(rad);
+
+                ctx.fillStyle = label.color;
+                ctx.fillText(label.text, x, y + 5);
+            });
+        }
+
+        // Update all visualizations
+        function updateAllVisualizations() {
+            drawGradientPreview('sat-to-hue-preview', 'sat-to-hue');
+            drawGradientPreview('lum-to-hue-preview', 'lum-to-hue');
+            drawGradientPreview('lum-to-lum-preview', 'lum-to-lum');
+
+            drawVectorscope('sat-vectorscope', 'sat-to-hue');
+            drawVectorscope('lum-vectorscope', 'lum-to-hue');
+            drawVectorscope('combined-hue-wheel', null, true);
+        }
+
+        // Update point editor
+        function updatePointEditor(curveKey) {
+            const container = document.getElementById(curveKey + '-points');
+            const curve = curves[curveKey];
+
+            curve.points.sort((a, b) => a.x - b.x);
+
+            container.innerHTML = '<h3>Control Points</h3>';
+
+            curve.points.forEach((point, index) => {
+                const row = document.createElement('div');
+                row.className = 'point-row';
+
+                const xPrecision = curveKey === 'lum-to-lum' ? 3 : 3;
+                const yPrecision = curveKey === 'lum-to-lum' ? 3 : 1;
+
+                row.innerHTML = `
+                    <label>P${index + 1}</label>
+                    <input type="number"
+                           value="${point.x.toFixed(xPrecision)}"
+                           step="0.01"
+                           min="0"
+                           max="1"
+                           onchange="updatePointValue('${curveKey}', ${index}, 'x', this.value)">
+                    <input type="number"
+                           value="${point.y.toFixed(yPrecision)}"
+                           step="${curveKey === 'lum-to-lum' ? '0.01' : '0.5'}"
+                           min="${curve.yRange[0]}"
+                           max="${curve.yRange[1]}"
+                           onchange="updatePointValue('${curveKey}', ${index}, 'y', this.value)">
+                    <button class="danger" onclick="deletePoint('${curveKey}', ${index})">Delete</button>
+                `;
+
+                container.appendChild(row);
+            });
+        }
+
+        // Update point value from text input
+        function updatePointValue(curveKey, index, axis, value) {
+            const curve = curves[curveKey];
+            const numValue = parseFloat(value);
+
+            if (axis === 'x') {
+                curve.points[index].x = Math.max(0, Math.min(1, numValue));
+            } else {
+                curve.points[index].y = Math.max(curve.yRange[0], Math.min(curve.yRange[1], numValue));
+            }
+
+            const canvas = document.getElementById(curveKey + '-canvas');
+            drawCurve(canvas, curveKey);
+            updatePointEditor(curveKey);
+            updateAllVisualizations();
+        }
+
+        // Delete point
+        function deletePoint(curveKey, index) {
+            const curve = curves[curveKey];
+            if (curve.points.length > 2) {
+                curve.points.splice(index, 1);
+                const canvas = document.getElementById(curveKey + '-canvas');
+                drawCurve(canvas, curveKey);
+                updatePointEditor(curveKey);
+                updateAllVisualizations();
+            }
+        }
+
+        // Add point programmatically
+        function addPoint(curveKey, x, y) {
+            curves[curveKey].points.push({x, y});
+            const canvas = document.getElementById(curveKey + '-canvas');
+            drawCurve(canvas, curveKey);
+            updatePointEditor(curveKey);
+            updateAllVisualizations();
+        }
+
+        // Mouse event handlers
+        function handleMouseDown(e, canvas, curveKey) {
+            const pos = canvasToCurve(canvas, e.clientX, e.clientY, curveKey);
+            const curve = curves[curveKey];
+
+            // Check if clicking on existing point
+            selectedPoint = null;
+            for (let i = 0; i < curve.points.length; i++) {
+                const point = curve.points[i];
+                const canvasPos = curveToCanvas(canvas, point, curveKey);
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+                const mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+                const dist = Math.sqrt((mouseX - canvasPos.x) ** 2 + (mouseY - canvasPos.y) ** 2);
+                if (dist < 12) {
+                    selectedPoint = i;
+                    activeCanvas = curveKey;
+                    break;
+                }
+            }
+
+            // If not clicking on point, add new point
+            if (selectedPoint === null) {
+                curve.points.push(pos);
+                drawCurve(canvas, curveKey);
+                updatePointEditor(curveKey);
+                updateAllVisualizations();
+            }
+        }
+
+        function handleMouseMove(e, canvas, curveKey) {
+            if (selectedPoint !== null && activeCanvas === curveKey) {
+                const pos = canvasToCurve(canvas, e.clientX, e.clientY, curveKey);
+                curves[curveKey].points[selectedPoint] = pos;
+                drawCurve(canvas, curveKey);
+                updatePointEditor(curveKey);
+                updateAllVisualizations();
+            }
+        }
+
+        function handleMouseUp(e, canvas, curveKey) {
+            selectedPoint = null;
+            activeCanvas = null;
+        }
+
+        function handleRightClick(e, canvas, curveKey) {
+            e.preventDefault();
+            const curve = curves[curveKey];
+
+            // Find point to delete
+            for (let i = 0; i < curve.points.length; i++) {
+                const point = curve.points[i];
+                const canvasPos = curveToCanvas(canvas, point, curveKey);
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+                const mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+                const dist = Math.sqrt((mouseX - canvasPos.x) ** 2 + (mouseY - canvasPos.y) ** 2);
+                if (dist < 12) {
+                    if (curve.points.length > 2) {
+                        curve.points.splice(i, 1);
+                        drawCurve(canvas, curveKey);
+                        updatePointEditor(curveKey);
+                        updateAllVisualizations();
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Curve operations
+        function clearCurve(curveKey) {
+            curves[curveKey].points = [];
+            const canvas = document.getElementById(curveKey + '-canvas');
+            drawCurve(canvas, curveKey);
+            updatePointEditor(curveKey);
+            updateAllVisualizations();
+        }
+
+        function resetCurve(curveKey) {
+            if (curveKey === 'lum-to-lum') {
+                curves[curveKey].points = [{x: 0, y: 0}, {x: 1, y: 1}];
+            } else {
+                curves[curveKey].points = [{x: 0, y: 0}, {x: 1, y: 0}];
+            }
+            const canvas = document.getElementById(curveKey + '-canvas');
+            drawCurve(canvas, curveKey);
+            updatePointEditor(curveKey);
+            updateAllVisualizations();
+        }
+
+        // Load preset
+        function loadPreset(curveKey, presetName) {
+            if (!presetName) return;
+
+            const preset = presets[curveKey][presetName];
+            if (preset) {
+                curves[curveKey].points = JSON.parse(JSON.stringify(preset));
+                const canvas = document.getElementById(curveKey + '-canvas');
+                drawCurve(canvas, curveKey);
+                updatePointEditor(curveKey);
+                updateAllVisualizations();
+            }
+
+            // Reset dropdown
+            document.getElementById(curveKey + '-preset').value = '';
+        }
+
+        // Generate DCTL code
+        function generateDCTL() {
+            let output = '// FilmGrade Curve Data - Paste into FilmGrade.dctl\n';
+            output += '// Replace the corresponding arrays in the transform function\n\n';
+
+            for (const [key, curve] of Object.entries(curves)) {
+                output += `// ${curve.name} Curve\n`;
+                output += `float ${curve.varName}[] = {`;
+
+                const points = [];
+                curve.points.sort((a, b) => a.x - b.x);
+
+                for (const point of curve.points) {
+                    points.push(`${point.x.toFixed(6)}f, ${point.y.toFixed(6)}f`);
+                }
+
+                output += points.join(', ');
+                output += '};\n';
+                output += `int ${curve.varName}_size = ${curve.points.length};\n\n`;
+            }
+
+            document.getElementById('export-output').value = output;
+        }
+
+        // Copy to clipboard
+        function copyToClipboard() {
+            const textarea = document.getElementById('export-output');
+            textarea.select();
+            document.execCommand('copy');
+            alert('DCTL code copied to clipboard!');
+        }
+
+        // Import from DCTL
+        function importFromDCTL() {
+            const input = prompt('Paste DCTL curve data (arrays only):');
+            if (!input) return;
+
+            try {
+                // Parse each curve array
+                for (const [key, curve] of Object.entries(curves)) {
+                    const regex = new RegExp(`float ${curve.varName}\\[\\]\\s*=\\s*\\{([^}]+)\\}`, 'i');
+                    const match = input.match(regex);
+
+                    if (match) {
+                        const values = match[1].split(',').map(v => parseFloat(v.trim().replace('f', '')));
+                        curve.points = [];
+
+                        for (let i = 0; i < values.length; i += 2) {
+                            if (i + 1 < values.length) {
+                                curve.points.push({
+                                    x: values[i],
+                                    y: values[i + 1]
+                                });
+                            }
+                        }
+
+                        const canvas = document.getElementById(key + '-canvas');
+                        drawCurve(canvas, key);
+                        updatePointEditor(key);
+                    }
+                }
+
+                updateAllVisualizations();
+                alert('Curves imported successfully!');
+            } catch (e) {
+                alert('Error importing curves: ' + e.message);
+            }
+        }
+
+        // Save configuration to JSON
+        function saveToJSON() {
+            const config = {
+                version: '1.0',
+                curves: {}
+            };
+
+            for (const [key, curve] of Object.entries(curves)) {
+                config.curves[key] = {
+                    points: curve.points,
+                    name: curve.name
+                };
+            }
+
+            const json = JSON.stringify(config, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'filmgrade-curves.json';
+            a.click();
+
+            URL.revokeObjectURL(url);
+        }
+
+        // Load configuration from JSON
+        function loadFromJSON() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+
+                reader.onload = (event) => {
+                    try {
+                        const config = JSON.parse(event.target.result);
+
+                        for (const [key, data] of Object.entries(config.curves)) {
+                            if (curves[key]) {
+                                curves[key].points = data.points;
+                                const canvas = document.getElementById(key + '-canvas');
+                                drawCurve(canvas, key);
+                                updatePointEditor(key);
+                            }
+                        }
+
+                        updateAllVisualizations();
+                        alert('Configuration loaded successfully!');
+                    } catch (err) {
+                        alert('Error loading configuration: ' + err.message);
+                    }
+                };
+
+                reader.readAsText(file);
+            };
+
+            input.click();
+        }
+
+        // Initialize all canvases
+        initCanvas('sat-to-hue-canvas', 'sat-to-hue');
+        initCanvas('lum-to-hue-canvas', 'lum-to-hue');
+        initCanvas('lum-to-lum-canvas', 'lum-to-lum');
+
+        // Initial visualization draw
+        updateAllVisualizations();
+    </script>
+</body>
+</html>
