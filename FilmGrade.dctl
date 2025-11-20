@@ -86,6 +86,10 @@ DEFINE_UI_PARAMS(enable_energy_correction, Enable Energy Correction, DCTLUI_CHEC
 DEFINE_UI_PARAMS(enable_inverted_gamut, Enable Inverted Gamut Pass, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(use_moment_saturation, Use Moment Space Saturation, DCTLUI_CHECK_BOX, 0)
 
+// Global Density (JP_2499 style - darkens saturated colors, leaves achromatic unchanged)
+DEFINE_UI_PARAMS(enable_global_density, Enable Global Density, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(global_density, Global Density, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.5, 0.01)
+
 // Per-Hue-Zone Sat->Hue (CMY - Film Negative Primaries)
 DEFINE_UI_PARAMS(enable_hue_zone_sat_cmy, Enable CMY Sat-Hue, DCTLUI_CHECK_BOX, 0)
 DEFINE_UI_PARAMS(sat_hue_cyan, Sat-Hue Cyan deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
@@ -718,7 +722,23 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     rgb = vdot(matrix_xyz_to_rec709, rgb);
 
     // ========================================================================
-    // 3. SELECT PRESET CURVES
+    // 3. GLOBAL DENSITY (darkens saturated colors, achromatic unchanged)
+    // ========================================================================
+    if (enable_global_density) {
+        // Calculate saturation mask using moment space
+        float satm = satmask(rgb);
+
+        // Apply density: higher saturation = darker
+        // density = 1.0 is neutral, >1.0 darkens saturated colors, <1.0 brightens them
+        float density_multiplier = _powf(1.0f / (1.0f + 0.5f * satm * satm), global_density);
+
+        rgb.x *= density_multiplier;
+        rgb.y *= density_multiplier;
+        rgb.z *= density_multiplier;
+    }
+
+    // ========================================================================
+    // 4. SELECT PRESET CURVES
     // ========================================================================
     const float (*sat_to_hue)[2];
     const float (*lum_to_hue)[2];
