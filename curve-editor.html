@@ -286,6 +286,7 @@
                 <li><strong>Right-click</strong> on a point to delete it</li>
                 <li><strong>Load presets</strong> for common film looks</li>
                 <li><strong>Vectorscopes</strong> show hue transformations in real-time</li>
+                <li><strong>Density curves</strong> simulate film dye layers (Cyan/Magenta/Yellow)</li>
                 <li><strong>Export DCTL</strong> generates code to paste into FilmGrade.dctl</li>
             </ul>
         </div>
@@ -386,6 +387,96 @@
 
                     <div class="point-editor" id="lum-to-lum-points"></div>
                 </div>
+
+                <!-- Red Density Curve (Cyan Dye Layer) -->
+                <div class="curve-editor">
+                    <h2>Red Density (Cyan Dye)</h2>
+                    <div class="curve-info">X: Input Red (0.0 - 1.0) | Y: Output Red (0.0 - 1.0)</div>
+
+                    <div class="preset-controls">
+                        <select id="red-density-preset" onchange="loadPreset('red-density', this.value)">
+                            <option value="">-- Load Preset --</option>
+                            <option value="kodak-5219">Kodak 5219</option>
+                            <option value="fuji-eterna">Fuji Eterna</option>
+                            <option value="low-contrast">Low Contrast</option>
+                        </select>
+                    </div>
+
+                    <canvas id="red-density-canvas" class="curve-canvas" width="800" height="600"></canvas>
+
+                    <div class="gradient-preview">
+                        <h3>Preview: Red Channel Response</h3>
+                        <canvas id="red-density-preview" class="preview-canvas" width="800" height="160"></canvas>
+                    </div>
+
+                    <div class="controls">
+                        <button onclick="addPoint('red-density', 0.5, 0.5)">Add Point (0.5, 0.5)</button>
+                        <button onclick="clearCurve('red-density')">Clear Curve</button>
+                        <button onclick="resetCurve('red-density')">Reset to Linear</button>
+                    </div>
+
+                    <div class="point-editor" id="red-density-points"></div>
+                </div>
+
+                <!-- Green Density Curve (Magenta Dye Layer) -->
+                <div class="curve-editor">
+                    <h2>Green Density (Magenta Dye)</h2>
+                    <div class="curve-info">X: Input Green (0.0 - 1.0) | Y: Output Green (0.0 - 1.0)</div>
+
+                    <div class="preset-controls">
+                        <select id="green-density-preset" onchange="loadPreset('green-density', this.value)">
+                            <option value="">-- Load Preset --</option>
+                            <option value="kodak-5219">Kodak 5219</option>
+                            <option value="fuji-eterna">Fuji Eterna</option>
+                            <option value="low-contrast">Low Contrast</option>
+                        </select>
+                    </div>
+
+                    <canvas id="green-density-canvas" class="curve-canvas" width="800" height="600"></canvas>
+
+                    <div class="gradient-preview">
+                        <h3>Preview: Green Channel Response</h3>
+                        <canvas id="green-density-preview" class="preview-canvas" width="800" height="160"></canvas>
+                    </div>
+
+                    <div class="controls">
+                        <button onclick="addPoint('green-density', 0.5, 0.5)">Add Point (0.5, 0.5)</button>
+                        <button onclick="clearCurve('green-density')">Clear Curve</button>
+                        <button onclick="resetCurve('green-density')">Reset to Linear</button>
+                    </div>
+
+                    <div class="point-editor" id="green-density-points"></div>
+                </div>
+
+                <!-- Blue Density Curve (Yellow Dye Layer) -->
+                <div class="curve-editor">
+                    <h2>Blue Density (Yellow Dye)</h2>
+                    <div class="curve-info">X: Input Blue (0.0 - 1.0) | Y: Output Blue (0.0 - 1.0)</div>
+
+                    <div class="preset-controls">
+                        <select id="blue-density-preset" onchange="loadPreset('blue-density', this.value)">
+                            <option value="">-- Load Preset --</option>
+                            <option value="kodak-5219">Kodak 5219</option>
+                            <option value="fuji-eterna">Fuji Eterna</option>
+                            <option value="low-contrast">Low Contrast</option>
+                        </select>
+                    </div>
+
+                    <canvas id="blue-density-canvas" class="curve-canvas" width="800" height="600"></canvas>
+
+                    <div class="gradient-preview">
+                        <h3>Preview: Blue Channel Response</h3>
+                        <canvas id="blue-density-preview" class="preview-canvas" width="800" height="160"></canvas>
+                    </div>
+
+                    <div class="controls">
+                        <button onclick="addPoint('blue-density', 0.5, 0.5)">Add Point (0.5, 0.5)</button>
+                        <button onclick="clearCurve('blue-density')">Clear Curve</button>
+                        <button onclick="resetCurve('blue-density')">Reset to Linear</button>
+                    </div>
+
+                    <div class="point-editor" id="blue-density-points"></div>
+                </div>
             </div>
 
             <!-- Visualizations Column -->
@@ -446,6 +537,24 @@
                 yRange: [0, 1],
                 name: 'Lum → Lum',
                 varName: 'lum_to_lum'
+            },
+            'red-density': {
+                points: [{x: 0, y: 0}, {x: 1, y: 1}],
+                yRange: [0, 1],
+                name: 'Red Density (Cyan Dye)',
+                varName: 'red_density'
+            },
+            'green-density': {
+                points: [{x: 0, y: 0}, {x: 1, y: 1}],
+                yRange: [0, 1],
+                name: 'Green Density (Magenta Dye)',
+                varName: 'green_density'
+            },
+            'blue-density': {
+                points: [{x: 0, y: 0}, {x: 1, y: 1}],
+                yRange: [0, 1],
+                name: 'Blue Density (Yellow Dye)',
+                varName: 'blue_density'
             }
         };
 
@@ -469,6 +578,21 @@
                 'hard-contrast': [{x: 0, y: 0}, {x: 0.5, y: 0.52}, {x: 1, y: 1}],
                 'lifted-blacks': [{x: 0, y: 0.15}, {x: 0.5, y: 0.5}, {x: 1, y: 1}],
                 'crushed-blacks': [{x: 0, y: 0}, {x: 0.2, y: 0.05}, {x: 0.5, y: 0.5}, {x: 1, y: 1}]
+            },
+            'red-density': {
+                'kodak-5219': [{x: 0, y: 0}, {x: 0.5, y: 0.48}, {x: 1, y: 1}],
+                'fuji-eterna': [{x: 0, y: 0}, {x: 0.5, y: 0.52}, {x: 1, y: 1}],
+                'low-contrast': [{x: 0, y: 0.05}, {x: 0.5, y: 0.5}, {x: 1, y: 0.95}]
+            },
+            'green-density': {
+                'kodak-5219': [{x: 0, y: 0}, {x: 0.5, y: 0.50}, {x: 1, y: 1}],
+                'fuji-eterna': [{x: 0, y: 0}, {x: 0.5, y: 0.48}, {x: 1, y: 1}],
+                'low-contrast': [{x: 0, y: 0.05}, {x: 0.5, y: 0.5}, {x: 1, y: 0.95}]
+            },
+            'blue-density': {
+                'kodak-5219': [{x: 0, y: 0}, {x: 0.5, y: 0.52}, {x: 1, y: 1}],
+                'fuji-eterna': [{x: 0, y: 0}, {x: 0.5, y: 0.50}, {x: 1, y: 1}],
+                'low-contrast': [{x: 0, y: 0.05}, {x: 0.5, y: 0.5}, {x: 0.95, y: 0.95}]
             }
         };
 
@@ -725,16 +849,36 @@
             for (let i = 0; i < canvas.width; i++) {
                 const x = i / canvas.width;
 
-                if (curveKey === 'lum-to-lum') {
-                    // Luminance curve - show grayscale gradient
-                    const inputLum = Math.round(x * 255);
-                    const outputLum = Math.round(cubicSplineInterpolate(x, curve.points) * 255);
+                if (curveKey === 'lum-to-lum' || curveKey.includes('density')) {
+                    // Luminance/density curves - show grayscale or channel gradient
+                    const inputVal = Math.round(x * 255);
+                    const outputVal = Math.round(cubicSplineInterpolate(x, curve.points) * 255);
 
-                    ctx.fillStyle = `rgb(${inputLum}, ${inputLum}, ${inputLum})`;
-                    ctx.fillRect(i, barY1, 1, barHeight);
-
-                    ctx.fillStyle = `rgb(${outputLum}, ${outputLum}, ${outputLum})`;
-                    ctx.fillRect(i, barY2, 1, barHeight);
+                    if (curveKey === 'red-density') {
+                        // Red channel only
+                        ctx.fillStyle = `rgb(${inputVal}, 0, 0)`;
+                        ctx.fillRect(i, barY1, 1, barHeight);
+                        ctx.fillStyle = `rgb(${outputVal}, 0, 0)`;
+                        ctx.fillRect(i, barY2, 1, barHeight);
+                    } else if (curveKey === 'green-density') {
+                        // Green channel only
+                        ctx.fillStyle = `rgb(0, ${inputVal}, 0)`;
+                        ctx.fillRect(i, barY1, 1, barHeight);
+                        ctx.fillStyle = `rgb(0, ${outputVal}, 0)`;
+                        ctx.fillRect(i, barY2, 1, barHeight);
+                    } else if (curveKey === 'blue-density') {
+                        // Blue channel only
+                        ctx.fillStyle = `rgb(0, 0, ${inputVal})`;
+                        ctx.fillRect(i, barY1, 1, barHeight);
+                        ctx.fillStyle = `rgb(0, 0, ${outputVal})`;
+                        ctx.fillRect(i, barY2, 1, barHeight);
+                    } else {
+                        // Lum to Lum - grayscale
+                        ctx.fillStyle = `rgb(${inputVal}, ${inputVal}, ${inputVal})`;
+                        ctx.fillRect(i, barY1, 1, barHeight);
+                        ctx.fillStyle = `rgb(${outputVal}, ${outputVal}, ${outputVal})`;
+                        ctx.fillRect(i, barY2, 1, barHeight);
+                    }
                 } else {
                     // Hue curves - show hue ring transformation
                     const inputHue = x * 360;
@@ -855,6 +999,9 @@
             drawGradientPreview('sat-to-hue-preview', 'sat-to-hue');
             drawGradientPreview('lum-to-hue-preview', 'lum-to-hue');
             drawGradientPreview('lum-to-lum-preview', 'lum-to-lum');
+            drawGradientPreview('red-density-preview', 'red-density');
+            drawGradientPreview('green-density-preview', 'green-density');
+            drawGradientPreview('blue-density-preview', 'blue-density');
 
             drawVectorscope('sat-vectorscope', 'sat-to-hue');
             drawVectorscope('lum-vectorscope', 'lum-to-hue');
@@ -1017,9 +1164,11 @@
         }
 
         function resetCurve(curveKey) {
-            if (curveKey === 'lum-to-lum') {
+            if (curveKey === 'lum-to-lum' || curveKey.includes('density')) {
+                // Linear curves (diagonal)
                 curves[curveKey].points = [{x: 0, y: 0}, {x: 1, y: 1}];
             } else {
+                // Flat hue curves (horizontal)
                 curves[curveKey].points = [{x: 0, y: 0}, {x: 1, y: 0}];
             }
             const canvas = document.getElementById(curveKey + '-canvas');
@@ -1047,13 +1196,20 @@
 
         // Generate DCTL code
         function generateDCTL() {
-            let output = '// FilmGrade Curve Data - Paste into FilmGrade.dctl\n';
-            output += '// Replace the corresponding arrays in the transform function\n\n';
+            let output = '// ============================================================================\n';
+            output += '// FILMGRADE CUSTOM CURVES - Generated from Web App\n';
+            output += '// ============================================================================\n';
+            output += '// INSTRUCTIONS:\n';
+            output += '// 1. Open FilmGrade.dctl in your text editor\n';
+            output += '// 2. Find the section: "// 3. SELECT PRESET CURVES" (around line 672)\n';
+            output += '// 3. Add this code AFTER the preset selection if/else block\n';
+            output += '// 4. The curves will override the preset values\n';
+            output += '// ============================================================================\n\n';
 
+            output += '    // CUSTOM CURVES FROM WEB APP (paste after preset selection)\n';
+
+            // Generate inline array declarations that override presets
             for (const [key, curve] of Object.entries(curves)) {
-                output += `// ${curve.name} Curve\n`;
-                output += `float ${curve.varName}[] = {`;
-
                 const points = [];
                 curve.points.sort((a, b) => a.x - b.x);
 
@@ -1061,9 +1217,35 @@
                     points.push(`${point.x.toFixed(6)}f, ${point.y.toFixed(6)}f`);
                 }
 
-                output += points.join(', ');
-                output += '};\n';
-                output += `int ${curve.varName}_size = ${curve.points.length};\n\n`;
+                output += `    float custom_${curve.varName}[] = {${points.join(', ')}};\n`;
+            }
+
+            output += '\n    // Override preset arrays with custom curves\n';
+            for (const [key, curve] of Object.entries(curves)) {
+                output += `    ${curve.varName} = custom_${curve.varName};\n`;
+                output += `    ${curve.varName}_size = ${curve.points.length};\n`;
+            }
+
+            output += '\n// ============================================================================\n';
+            output += '// END CUSTOM CURVES\n';
+            output += '// ============================================================================\n\n';
+
+            output += '// ALTERNATIVE: Replace __CONSTANT__ arrays at the top of the file\n';
+            output += '// If you prefer to create permanent presets, replace the arrays at lines 567-648:\n\n';
+
+            for (const [key, curve] of Object.entries(curves)) {
+                output += `// ${curve.name}\n`;
+                output += `__CONSTANT__ float custom_${curve.varName}[][2] = {\n`;
+
+                const points = [];
+                curve.points.sort((a, b) => a.x - b.x);
+
+                for (const point of curve.points) {
+                    points.push(`    {${point.x.toFixed(6)}f, ${point.y.toFixed(6)}f}`);
+                }
+
+                output += points.join(',\n');
+                output += '\n};\n\n';
             }
 
             document.getElementById('export-output').value = output;
@@ -1180,6 +1362,9 @@
         initCanvas('sat-to-hue-canvas', 'sat-to-hue');
         initCanvas('lum-to-hue-canvas', 'lum-to-hue');
         initCanvas('lum-to-lum-canvas', 'lum-to-lum');
+        initCanvas('red-density-canvas', 'red-density');
+        initCanvas('green-density-canvas', 'green-density');
+        initCanvas('blue-density-canvas', 'blue-density');
 
         // Initial visualization draw
         updateAllVisualizations();

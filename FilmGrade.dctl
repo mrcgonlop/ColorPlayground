@@ -24,16 +24,26 @@ DEFINE_UI_PARAMS(output_mode, Output Mode, DCTLUI_COMBO_BOX, 0, {LOG_PASSTHROUGH
 DEFINE_UI_PARAMS(enable_sat_to_hue, Enable Sat→Hue Curve, DCTLUI_CHECK_BOX, 0)
 DEFINE_UI_PARAMS(enable_lum_to_hue, Enable Lum→Hue Curve, DCTLUI_CHECK_BOX, 0)
 DEFINE_UI_PARAMS(enable_lum_to_lum, Enable Lum→Lum Curve, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(enable_density_curves, Enable RGB Density Curves, DCTLUI_CHECK_BOX, 0)
 
 // Film Emulation Properties
 DEFINE_UI_PARAMS(enable_gamut_compression, Enable Gamut Compression, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(gamut_compress_power, Gamut Compress Power, DCTLUI_SLIDER_FLOAT, 0.03, 0.01, 0.15, 0.01)
 
 DEFINE_UI_PARAMS(enable_toe_shoulder, Enable Toe/Shoulder, DCTLUI_CHECK_BOX, 1)
+DEFINE_UI_PARAMS(enable_per_channel_toe, Enable Per-Channel Toe, DCTLUI_CHECK_BOX, 0)
 DEFINE_UI_PARAMS(toe_mx, Toe Max Input, DCTLUI_SLIDER_FLOAT, 0.18, 0.1, 0.3, 0.01)
 DEFINE_UI_PARAMS(toe_my, Toe Min Output, DCTLUI_SLIDER_FLOAT, 0.1, 0.05, 0.2, 0.01)
 DEFINE_UI_PARAMS(toe_py, Toe Peak Output, DCTLUI_SLIDER_FLOAT, 1.0, 0.8, 1.2, 0.01)
 DEFINE_UI_PARAMS(toe_gamma, Toe Gamma, DCTLUI_SLIDER_FLOAT, 1.15, 0.8, 1.5, 0.01)
+
+// Per-Channel Toe/Shoulder (Film Dye Rolloff)
+DEFINE_UI_PARAMS(toe_mx_r, Toe Max Input R, DCTLUI_SLIDER_FLOAT, 0.18, 0.1, 0.3, 0.01)
+DEFINE_UI_PARAMS(toe_mx_g, Toe Max Input G, DCTLUI_SLIDER_FLOAT, 0.18, 0.1, 0.3, 0.01)
+DEFINE_UI_PARAMS(toe_mx_b, Toe Max Input B, DCTLUI_SLIDER_FLOAT, 0.18, 0.1, 0.3, 0.01)
+DEFINE_UI_PARAMS(toe_gamma_r, Toe Gamma R, DCTLUI_SLIDER_FLOAT, 1.15, 0.8, 1.5, 0.01)
+DEFINE_UI_PARAMS(toe_gamma_g, Toe Gamma G, DCTLUI_SLIDER_FLOAT, 1.15, 0.8, 1.5, 0.01)
+DEFINE_UI_PARAMS(toe_gamma_b, Toe Gamma B, DCTLUI_SLIDER_FLOAT, 1.15, 0.8, 1.5, 0.01)
 
 DEFINE_UI_PARAMS(enable_purity, Enable Purity saturation, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(purity_red, Purity Red, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
@@ -600,6 +610,43 @@ __CONSTANT__ float lum_to_lum_ICONIC[][2] = {
     {1.0f, 1.0f}
 };
 
+// RGB Density curves (per-channel film dye layer response)
+// Red channel (Cyan dye layer)
+__CONSTANT__ float red_density_NEUTRAL[][2] = {
+    {0.0f, 0.0f},
+    {1.0f, 1.0f}
+};
+
+__CONSTANT__ float red_density_ICONIC[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.48f},
+    {1.0f, 1.0f}
+};
+
+// Green channel (Magenta dye layer)
+__CONSTANT__ float green_density_NEUTRAL[][2] = {
+    {0.0f, 0.0f},
+    {1.0f, 1.0f}
+};
+
+__CONSTANT__ float green_density_ICONIC[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.50f},
+    {1.0f, 1.0f}
+};
+
+// Blue channel (Yellow dye layer)
+__CONSTANT__ float blue_density_NEUTRAL[][2] = {
+    {0.0f, 0.0f},
+    {1.0f, 1.0f}
+};
+
+__CONSTANT__ float blue_density_ICONIC[][2] = {
+    {0.0f, 0.0f},
+    {0.5f, 0.52f},
+    {1.0f, 1.0f}
+};
+
 // ============================================================================
 // MAIN TRANSFORM
 // ============================================================================
@@ -627,15 +674,26 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     const float (*sat_to_hue)[2];
     const float (*lum_to_hue)[2];
     const float (*lum_to_lum)[2];
-    int sat_to_hue_size, lum_to_hue_size, lum_to_lum_size; 
+    const float (*red_density)[2];
+    const float (*green_density)[2];
+    const float (*blue_density)[2];
+    int sat_to_hue_size, lum_to_hue_size, lum_to_lum_size;
+    int red_density_size, green_density_size, blue_density_size;
+
     if (preset == 0) { // NEUTRAL
         sat_to_hue = sat_to_hue_NEUTRAL; sat_to_hue_size = 2;
         lum_to_hue = lum_to_hue_NEUTRAL; lum_to_hue_size = 2;
         lum_to_lum = lum_to_lum_NEUTRAL; lum_to_lum_size = 2;
+        red_density = red_density_NEUTRAL; red_density_size = 2;
+        green_density = green_density_NEUTRAL; green_density_size = 2;
+        blue_density = blue_density_NEUTRAL; blue_density_size = 2;
     } else { // ICONIC_FILM
         sat_to_hue = sat_to_hue_ICONIC; sat_to_hue_size = 3;
         lum_to_hue = lum_to_hue_ICONIC; lum_to_hue_size = 3;
         lum_to_lum = lum_to_lum_ICONIC; lum_to_lum_size = 4;
+        red_density = red_density_ICONIC; red_density_size = 3;
+        green_density = green_density_ICONIC; green_density_size = 3;
+        blue_density = blue_density_ICONIC; blue_density_size = 3;
     }
 
     // ========================================================================
@@ -788,11 +846,31 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     // 9. TOE/SHOULDER (tone mapping)
     // ========================================================================
     if (enable_toe_shoulder) {
-        rgb = modifiedDanieleCurve(rgb, toe_mx, toe_my, toe_py, toe_gamma, 0.04f, 0);
+        if (enable_per_channel_toe) {
+            // Per-channel toe/shoulder (film dye rolloff characteristics)
+            rgb.x = modifiedDanieleCurve(make_float3(rgb.x, rgb.x, rgb.x), toe_mx_r, toe_my, toe_py, toe_gamma_r, 0.04f, 0).x;
+            rgb.y = modifiedDanieleCurve(make_float3(rgb.y, rgb.y, rgb.y), toe_mx_g, toe_my, toe_py, toe_gamma_g, 0.04f, 0).y;
+            rgb.z = modifiedDanieleCurve(make_float3(rgb.z, rgb.z, rgb.z), toe_mx_b, toe_my, toe_py, toe_gamma_b, 0.04f, 0).z;
+        } else {
+            // Global toe/shoulder
+            rgb = modifiedDanieleCurve(rgb, toe_mx, toe_my, toe_py, toe_gamma, 0.04f, 0);
+        }
     }
 
     // ========================================================================
-    // 10. LUM→LUM CURVE (on linear RGB after tone mapping)
+    // 10. RGB DENSITY CURVES (per-channel film dye layer response)
+    // ========================================================================
+    if (enable_density_curves) {
+        rgb.x = cubic_spline_interpolate(rgb.x, red_density, red_density_size);
+        rgb.y = cubic_spline_interpolate(rgb.y, green_density, green_density_size);
+        rgb.z = cubic_spline_interpolate(rgb.z, blue_density, blue_density_size);
+
+        // Clamp to valid range
+        rgb = maxf3(0.0f, rgb);
+    }
+
+    // ========================================================================
+    // 11. LUM→LUM CURVE (on linear RGB after tone mapping)
     // ========================================================================
     if (enable_lum_to_lum) {
         float3 weights = avgweights(matrix_rec709_to_xyz);
