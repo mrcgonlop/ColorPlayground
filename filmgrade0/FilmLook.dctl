@@ -443,50 +443,19 @@ __DEVICE__ float parametric_lum_to_lum(float lum, float contrast, float toe_lift
 }
 
 // ============================================================================
-// PRESET REFERENCE VALUES
+// DIRECT DWG<->REC709 MATRICES (avoid XYZ intermediate for precision)
+// Computed as: DWG_to_XYZ * XYZ_to_Rec709 and Rec709_to_XYZ * XYZ_to_DWG
 // ============================================================================
-//
-// To use presets in DaVinci Resolve:
-// 1. Select a preset name from dropdown (currently just labels)
-// 2. Manually set the sliders to the values listed below for that preset
-// 3. Right-click the preset dropdown and select "Save Preset" to store your values
-//
-// NEUTRAL (preset 1):
-//   All sliders at default/zero values
-//
-// KODAK 5219 Vision3 (preset 2):
-//   Sat to Hue Strength: 8.0, Shadow Hue: -5.0, Highlight Hue: 10.0
-//   Contrast: 1.08, Toe Lift: 0.04, Shoulder Softness: 0.015
-//   Red Density: -0.012, Blue Density: 0.012
-//
-// FUJI Eterna 500T (preset 3):
-//   Sat to Hue Strength: -8.0, Peak: 0.6, Shadow Hue: -12.0, Highlight: 5.0
-//   Contrast: 0.95, Toe Lift: 0.02
-//   Red Density: 0.012, Green Density: -0.012
-//
-// EKTACHROME E100 (preset 4):
-//   Sat to Hue Strength: 15.0, Shape: 1.2, Shadow: -10.0, Highlight: 15.0
-//   Contrast: 1.15
-//   Red Density: -0.025, Green: 0.006, Blue: 0.025
-//
-// AGFA XTR 100 (preset 5):
-//   Sat to Hue Strength: -6.0, Shadow: 2.0, Highlight: -4.0
-//   Contrast: 0.92, Toe Lift: 0.025
-//   Red Density: -0.008, Green: 0.012, Blue: -0.012
-//   Purity Red: -0.08, Green: 0.08, Blue: -0.08
-//
-// TEAL & ORANGE (preset 6):
-//   Sat to Hue Strength: 5.0, Shadow: -20.0, Highlight: 18.0, Smoothness: 3.0
-//   Contrast: 1.12
-//   Red Density: -0.028, Green: -0.012, Blue: 0.028
-//
-// BLEACH BYPASS (preset 7):
-//   Sat to Hue Strength: -12.0, Shadow: -6.0, Highlight: -2.0
-//   Contrast: 1.25
-//   Red Density: -0.025, Green: -0.020, Blue: 0.008
-//   Purity Red: -0.18, Green: -0.18, Blue: -0.12
-//
-// ============================================================================
+
+#define matrix_davinciwg_to_rec709 \
+    make_float3x3(make_float3(2.67494379f, -1.25835305f, -0.32167033f), \
+                  make_float3(-1.02429867f, 2.04071193f, -0.01417663f), \
+                  make_float3(0.03174274f, -0.12804994f, 1.09398973f))
+
+#define matrix_rec709_to_davinciwg \
+    make_float3x3(make_float3(0.46974098f, 0.29004687f, 0.16232738f), \
+                  make_float3(0.23516086f, 0.54809858f, 0.14532879f), \
+                  make_float3(-0.02168362f, 0.06157985f, 0.88127019f))
 
 // ============================================================================
 // MAIN TRANSFORM
@@ -496,19 +465,107 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
 
     float3 rgb = make_float3(p_R, p_G, p_B);
 
+    // =========================================================================
+    // PRESET SYSTEM (OpenDRT style - preset overrides slider values)
+    // =========================================================================
+    // Local variables that can be overridden by presets
+    float p_global_density = global_density;
+    float p_density_red = density_red_compress;
+    float p_density_green = density_green_compress;
+    float p_density_blue = density_blue_compress;
+    float p_sat_hue_str = sat_hue_strength;
+    float p_sat_hue_pk = sat_hue_peak;
+    float p_sat_hue_sh = sat_hue_shape;
+    float p_shadow_hue = shadow_hue_shift;
+    float p_highlight_hue = highlight_hue_shift;
+    float p_lum_hue_smooth = lum_hue_smoothness;
+    float p_contrast = contrast;
+    float p_toe = toe_lift;
+    float p_shoulder = shoulder_softness;
+    float p_purity_r = purity_red;
+    float p_purity_g = purity_green;
+    float p_purity_b = purity_blue;
+    int p_enable_density = enable_global_density;
+    int p_enable_density_curves = enable_density_curves;
+    int p_enable_sat_hue = enable_sat_to_hue;
+    int p_enable_lum_hue = enable_lum_to_hue;
+    int p_enable_lum_lum = enable_lum_to_lum;
+    int p_enable_purity = enable_purity;
+
+    // NEUTRAL (preset 1) - all defaults, no overrides needed
+    if (preset == 1) {
+        p_global_density = 1.0f;
+        p_density_red = 0.0f, p_density_green = 0.0f, p_density_blue = 0.0f;
+        p_sat_hue_str = 0.0f, p_sat_hue_pk = 0.7f, p_sat_hue_sh = 1.0f;
+        p_shadow_hue = 0.0f, p_highlight_hue = 0.0f, p_lum_hue_smooth = 2.0f;
+        p_contrast = 1.0f, p_toe = 0.0f, p_shoulder = 0.0f;
+        p_purity_r = 0.0f, p_purity_g = 0.0f, p_purity_b = 0.0f;
+        p_enable_density = 0, p_enable_density_curves = 0;
+        p_enable_sat_hue = 0, p_enable_lum_hue = 0, p_enable_lum_lum = 0, p_enable_purity = 0;
+    }
+    // KODAK 5219 Vision3 (preset 2)
+    else if (preset == 2) {
+        p_sat_hue_str = 8.0f, p_sat_hue_pk = 0.7f, p_sat_hue_sh = 1.0f;
+        p_shadow_hue = -5.0f, p_highlight_hue = 10.0f, p_lum_hue_smooth = 2.5f;
+        p_contrast = 1.08f, p_toe = 0.04f, p_shoulder = 0.015f;
+        p_density_red = -0.012f, p_density_green = 0.0f, p_density_blue = 0.012f;
+        p_enable_sat_hue = 1, p_enable_lum_hue = 1, p_enable_lum_lum = 1, p_enable_density_curves = 1;
+    }
+    // FUJI Eterna 500T (preset 3)
+    else if (preset == 3) {
+        p_sat_hue_str = -8.0f, p_sat_hue_pk = 0.6f, p_sat_hue_sh = 1.0f;
+        p_shadow_hue = -12.0f, p_highlight_hue = 5.0f, p_lum_hue_smooth = 2.5f;
+        p_contrast = 0.95f, p_toe = 0.02f, p_shoulder = 0.0f;
+        p_density_red = 0.012f, p_density_green = -0.012f, p_density_blue = 0.0f;
+        p_enable_sat_hue = 1, p_enable_lum_hue = 1, p_enable_lum_lum = 1, p_enable_density_curves = 1;
+    }
+    // EKTACHROME E100 (preset 4)
+    else if (preset == 4) {
+        p_sat_hue_str = 15.0f, p_sat_hue_pk = 0.7f, p_sat_hue_sh = 1.2f;
+        p_shadow_hue = -10.0f, p_highlight_hue = 15.0f, p_lum_hue_smooth = 2.5f;
+        p_contrast = 1.15f, p_toe = 0.0f, p_shoulder = 0.0f;
+        p_density_red = -0.025f, p_density_green = 0.006f, p_density_blue = 0.025f;
+        p_enable_sat_hue = 1, p_enable_lum_hue = 1, p_enable_lum_lum = 1, p_enable_density_curves = 1;
+    }
+    // AGFA XTR 100 (preset 5)
+    else if (preset == 5) {
+        p_sat_hue_str = -6.0f, p_sat_hue_pk = 0.7f, p_sat_hue_sh = 1.0f;
+        p_shadow_hue = 2.0f, p_highlight_hue = -4.0f, p_lum_hue_smooth = 2.5f;
+        p_contrast = 0.92f, p_toe = 0.025f, p_shoulder = 0.0f;
+        p_density_red = -0.008f, p_density_green = 0.012f, p_density_blue = -0.012f;
+        p_purity_r = -0.08f, p_purity_g = 0.08f, p_purity_b = -0.08f;
+        p_enable_sat_hue = 1, p_enable_lum_hue = 1, p_enable_lum_lum = 1, p_enable_density_curves = 1, p_enable_purity = 1;
+    }
+    // TEAL & ORANGE (preset 6)
+    else if (preset == 6) {
+        p_sat_hue_str = 5.0f, p_sat_hue_pk = 0.7f, p_sat_hue_sh = 1.0f;
+        p_shadow_hue = -20.0f, p_highlight_hue = 18.0f, p_lum_hue_smooth = 3.0f;
+        p_contrast = 1.12f, p_toe = 0.0f, p_shoulder = 0.0f;
+        p_density_red = -0.028f, p_density_green = -0.012f, p_density_blue = 0.028f;
+        p_enable_sat_hue = 1, p_enable_lum_hue = 1, p_enable_lum_lum = 1, p_enable_density_curves = 1;
+    }
+    // BLEACH BYPASS (preset 7)
+    else if (preset == 7) {
+        p_sat_hue_str = -12.0f, p_sat_hue_pk = 0.7f, p_sat_hue_sh = 1.0f;
+        p_shadow_hue = -6.0f, p_highlight_hue = -2.0f, p_lum_hue_smooth = 2.5f;
+        p_contrast = 1.25f, p_toe = 0.0f, p_shoulder = 0.0f;
+        p_density_red = -0.025f, p_density_green = -0.020f, p_density_blue = 0.008f;
+        p_purity_r = -0.18f, p_purity_g = -0.18f, p_purity_b = -0.12f;
+        p_enable_sat_hue = 1, p_enable_lum_hue = 1, p_enable_lum_lum = 1, p_enable_density_curves = 1, p_enable_purity = 1;
+    }
+
     // LOG TO LINEAR
     rgb.x = oetf_davinci_intermediate(rgb.x, 1);
     rgb.y = oetf_davinci_intermediate(rgb.y, 1);
     rgb.z = oetf_davinci_intermediate(rgb.z, 1);
 
-    // DWG TO REC.709
-    rgb = vdot(matrix_davinciwg_to_xyz, rgb);
-    rgb = vdot(matrix_xyz_to_rec709, rgb);
+    // DWG TO REC.709 (direct matrix, no XYZ intermediate)
+    rgb = vdot(matrix_davinciwg_to_rec709, rgb);
 
     // GLOBAL DENSITY
-    if (enable_global_density) {
+    if (p_enable_density) {
         float satm = satmask(rgb);
-        float density_multiplier = _powf(1.0f / (1.0f + 0.5f * satm * satm), global_density);
+        float density_multiplier = _powf(1.0f / (1.0f + 0.5f * satm * satm), p_global_density);
         rgb *= density_multiplier;
     }
 
@@ -530,101 +587,107 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     }
 
     // RGB DENSITY CURVES
-    if (enable_density_curves) {
+    if (p_enable_density_curves) {
         float3 rgb_pre = rgb;
-        rgb.x = parametric_density_curve(rgb.x, density_red_compress);
-        rgb.y = parametric_density_curve(rgb.y, density_green_compress);
-        rgb.z = parametric_density_curve(rgb.z, density_blue_compress);
+        rgb.x = parametric_density_curve(rgb.x, p_density_red);
+        rgb.y = parametric_density_curve(rgb.y, p_density_green);
+        rgb.z = parametric_density_curve(rgb.z, p_density_blue);
         rgb = rgb_pre + (rgb - rgb_pre) * density_curves_mix;
         rgb = maxf3(0.0f, rgb);
     }
 
     // OPPONENT SPACE HUE OPERATIONS
-    float2 opp = opponent(rgb);
-    float lum = (rgb.x + rgb.y + rgb.z) / 3.0f;
+    // Only enter opponent space if hue operations are enabled (avoid lossy roundtrip)
+    int do_hue_ops = p_enable_sat_hue || enable_hue_zone_sat_cmy || enable_hue_zone_sat_rgb ||
+                     p_enable_lum_hue || enable_hue_zone_lum_cmy || enable_hue_zone_lum_rgb;
 
-    float sat;
-    if (use_moment_saturation) {
-        sat = satmask(rgb);
-    } else {
-        sat = achromatic_distance(opp);
+    if (do_hue_ops) {
+        float2 opp = opponent(rgb);
+        float lum = (rgb.x + rgb.y + rgb.z) / 3.0f;
+
+        float sat;
+        if (use_moment_saturation) {
+            sat = satmask(rgb);
+        } else {
+            sat = achromatic_distance(opp);
+        }
+
+        float sat_blend = smootherstep(0.0f, 0.2f, sat);
+        float3 hue_weights_cmy = get_hue_zone_weights_cmy(opp);
+        float3 hue_weights_rgb = get_hue_zone_weights_rgb(opp);
+
+        float total_hue_shift = 0.0f;
+
+        // SAT TO HUE
+        if ((p_enable_sat_hue || enable_hue_zone_sat_cmy || enable_hue_zone_sat_rgb) && sat > 0.001f) {
+            float hue_shift_deg = 0.0f;
+
+            if (p_enable_sat_hue) {
+                hue_shift_deg += parametric_sat_to_hue(sat, p_sat_hue_str, p_sat_hue_pk, p_sat_hue_sh);
+            }
+
+            if (enable_hue_zone_sat_cmy) {
+                float zone_shift = hue_weights_cmy.x * sat_hue_cyan +
+                                  hue_weights_cmy.y * sat_hue_magenta +
+                                  hue_weights_cmy.z * sat_hue_yellow;
+                hue_shift_deg += zone_shift * sat_blend;
+            }
+
+            if (enable_hue_zone_sat_rgb) {
+                float zone_shift = hue_weights_rgb.x * sat_hue_red +
+                                  hue_weights_rgb.y * sat_hue_green +
+                                  hue_weights_rgb.z * sat_hue_blue;
+                hue_shift_deg += zone_shift * sat_blend;
+            }
+
+            if (_fabs(hue_shift_deg) > 0.01f) {
+                const float DEG_TO_RAD = 3.14159265359f / 180.0f;
+                total_hue_shift += hue_shift_deg * DEG_TO_RAD * (p_enable_sat_hue ? sat_hue_mix : 1.0f);
+            }
+        }
+
+        // LUM TO HUE
+        if ((p_enable_lum_hue || enable_hue_zone_lum_cmy || enable_hue_zone_lum_rgb) && sat > 0.001f) {
+            float hue_shift_deg = 0.0f;
+
+            if (p_enable_lum_hue) {
+                hue_shift_deg += parametric_lum_to_hue(lum, p_shadow_hue, p_highlight_hue,
+                                                       lum_hue_midpoint, p_lum_hue_smooth);
+            }
+
+            if (enable_hue_zone_lum_cmy) {
+                float zone_shift = hue_weights_cmy.x * lum_hue_cyan +
+                                  hue_weights_cmy.y * lum_hue_magenta +
+                                  hue_weights_cmy.z * lum_hue_yellow;
+                hue_shift_deg += zone_shift * sat_blend;
+            }
+
+            if (enable_hue_zone_lum_rgb) {
+                float zone_shift = hue_weights_rgb.x * lum_hue_red +
+                                  hue_weights_rgb.y * lum_hue_green +
+                                  hue_weights_rgb.z * lum_hue_blue;
+                hue_shift_deg += zone_shift * sat_blend;
+            }
+
+            if (_fabs(hue_shift_deg) > 0.01f) {
+                const float DEG_TO_RAD = 3.14159265359f / 180.0f;
+                total_hue_shift += hue_shift_deg * DEG_TO_RAD * (p_enable_lum_hue ? lum_hue_mix : 1.0f);
+            }
+        }
+
+        if (_fabs(total_hue_shift) > 0.001f) {
+            opp = rotate_hue(opp, total_hue_shift);
+        }
+
+        rgb = opponent_to_rgb(opp, lum);
+        rgb = maxf3(0.0f, rgb);
     }
-
-    float sat_blend = smootherstep(0.0f, 0.2f, sat);
-    float3 hue_weights_cmy = get_hue_zone_weights_cmy(opp);
-    float3 hue_weights_rgb = get_hue_zone_weights_rgb(opp);
-
-    float total_hue_shift = 0.0f;
-
-    // SAT TO HUE
-    if ((enable_sat_to_hue || enable_hue_zone_sat_cmy || enable_hue_zone_sat_rgb) && sat > 0.001f) {
-        float hue_shift_deg = 0.0f;
-
-        if (enable_sat_to_hue) {
-            hue_shift_deg += parametric_sat_to_hue(sat, sat_hue_strength, sat_hue_peak, sat_hue_shape);
-        }
-
-        if (enable_hue_zone_sat_cmy) {
-            float zone_shift = hue_weights_cmy.x * sat_hue_cyan +
-                              hue_weights_cmy.y * sat_hue_magenta +
-                              hue_weights_cmy.z * sat_hue_yellow;
-            hue_shift_deg += zone_shift * sat_blend;
-        }
-
-        if (enable_hue_zone_sat_rgb) {
-            float zone_shift = hue_weights_rgb.x * sat_hue_red +
-                              hue_weights_rgb.y * sat_hue_green +
-                              hue_weights_rgb.z * sat_hue_blue;
-            hue_shift_deg += zone_shift * sat_blend;
-        }
-
-        if (_fabs(hue_shift_deg) > 0.01f) {
-            const float DEG_TO_RAD = 3.14159265359f / 180.0f;
-            total_hue_shift += hue_shift_deg * DEG_TO_RAD * (enable_sat_to_hue ? sat_hue_mix : 1.0f);
-        }
-    }
-
-    // LUM TO HUE
-    if ((enable_lum_to_hue || enable_hue_zone_lum_cmy || enable_hue_zone_lum_rgb) && sat > 0.001f) {
-        float hue_shift_deg = 0.0f;
-
-        if (enable_lum_to_hue) {
-            hue_shift_deg += parametric_lum_to_hue(lum, shadow_hue_shift, highlight_hue_shift,
-                                                   lum_hue_midpoint, lum_hue_smoothness);
-        }
-
-        if (enable_hue_zone_lum_cmy) {
-            float zone_shift = hue_weights_cmy.x * lum_hue_cyan +
-                              hue_weights_cmy.y * lum_hue_magenta +
-                              hue_weights_cmy.z * lum_hue_yellow;
-            hue_shift_deg += zone_shift * sat_blend;
-        }
-
-        if (enable_hue_zone_lum_rgb) {
-            float zone_shift = hue_weights_rgb.x * lum_hue_red +
-                              hue_weights_rgb.y * lum_hue_green +
-                              hue_weights_rgb.z * lum_hue_blue;
-            hue_shift_deg += zone_shift * sat_blend;
-        }
-
-        if (_fabs(hue_shift_deg) > 0.01f) {
-            const float DEG_TO_RAD = 3.14159265359f / 180.0f;
-            total_hue_shift += hue_shift_deg * DEG_TO_RAD * (enable_lum_to_hue ? lum_hue_mix : 1.0f);
-        }
-    }
-
-    if (_fabs(total_hue_shift) > 0.001f) {
-        opp = rotate_hue(opp, total_hue_shift);
-    }
-
-    rgb = opponent_to_rgb(opp, lum);
-    rgb = maxf3(0.0f, rgb);
 
     // LUM TO LUM
-    if (enable_lum_to_lum) {
+    if (p_enable_lum_lum) {
         float3 weights = avgweights(matrix_rec709_to_xyz);
         float lum_in = weights.x * rgb.x + weights.y * rgb.y + weights.z * rgb.z;
-        float lum_out = parametric_lum_to_lum(lum_in, contrast, toe_lift, shoulder_softness, lum_pivot);
+        float lum_out = parametric_lum_to_lum(lum_in, p_contrast, p_toe, p_shoulder, lum_pivot);
         lum_out = lum_in + (lum_out - lum_in) * lum_to_lum_mix;
         if (lum_in > 0.0001f) {
             float ratio = lum_out / lum_in;
@@ -633,16 +696,15 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     }
 
     // PURITY
-    if (enable_purity) {
+    if (p_enable_purity) {
         float3 rgb_pre = rgb;
-        float3x3 purity_matrix = simpleInsetMatrix(purity_red / 10.0f, purity_green / 10.0f, purity_blue / 10.0f, 1);
+        float3x3 purity_matrix = simpleInsetMatrix(p_purity_r / 10.0f, p_purity_g / 10.0f, p_purity_b / 10.0f, 1);
         rgb = vdot(purity_matrix, rgb);
         rgb = rgb_pre + (rgb - rgb_pre) * purity_mix;
     }
 
-    // REC.709 TO DWG
-    rgb = vdot(matrix_rec709_to_xyz, rgb);
-    rgb = vdot(matrix_xyz_to_davinciwg, rgb);
+    // REC.709 TO DWG (direct matrix, no XYZ intermediate)
+    rgb = vdot(matrix_rec709_to_davinciwg, rgb);
 
     // LINEAR TO LOG
     rgb.x = oetf_davinci_intermediate(rgb.x, 0);
