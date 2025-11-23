@@ -110,3 +110,71 @@ The 4 curves we have
 That gives you 7 parametric controls (6 curves + 1 matrix) which can approximate nearly any film stock's color behavior when properly tuned.
 Channel crosstalk is the secret sauce - it's what makes film look "analog" vs "digital." Without it, colors feel too clean and separated.
 Would you like me to create an enhanced version with all 6 curves + the crosstalk matrix as an interactive control?
+
+
+
+Purpose
+A pre-DRT look development tool that works in DaVinci Wide Gamut Log space. Designed to be placed before OpenDRT in the node tree, allowing scene-referred color grading that complements the display rendering transform.
+Input/Output
+Input: DWG Log (DaVinci Intermediate)
+Output: DWG Log (passes to OpenDRT for display rendering)
+Features
+1. Film Stock Presets
+a few iconic filmstocks
+2. Global Density
+Darkens saturated colors to simulate how film dye blocks more light. Single slider with enable toggle.
+1. RGB Density Curves
+Per-channel density adjustments (Red, Green, Blue) to simulate different film dye layer responses. Works in log space.
+1. Channel Crosstalk
+6 sliders controlling how each channel bleeds into the others (R→G, R→B, G→R, G→B, B→R, B→G). Simulates film dye interaction.
+1. Overall Hue Rotation
+3-axis hue rotation (R, G, B) using JP_2499-style matrix. Affects the entire image uniformly.
+1. Saturation-to-Hue Rotation
+Rotates hue based on saturation level:
+Global: Strength, Peak, Shape controls
+Per-zone CMY: Cyan, Magenta, Yellow independent sliders
+Per-zone RGB: Red, Green, Blue independent sliders
+1. Luminance-to-Hue Rotation
+Rotates hue based on luminance:
+Global: Shadow shift, Highlight shift, Midpoint, Smoothness
+Per-zone CMY: Cyan, Magenta, Yellow independent sliders
+Per-zone RGB: Red, Green, Blue independent sliders
+1. Luminance-to-Luminance (Contrast)
+Scene-referred contrast curve:
+Contrast (pivot-based)
+Toe Lift
+Shoulder Softness
+Luminance Pivot
+1. Purity (Saturation)
+Per-channel saturation control using inset matrix (R, G, B sliders).
+1.  Advanced Options
+Moment space saturation toggle (alternative saturation calculation)
+Plan for Rewrite from Scratch
+Phase 1: Foundation
+Study OpenDRT's working color space approach and matrix definitions
+Study JP_2499's Linear Rec.709 workflow and energy correction
+Research DaVinci Intermediate log encoding (OETF/EOTF)
+Define direct DWG↔Rec.709 matrices with exact inverses
+Phase 2: Core Pipeline
+Implement log-to-linear and linear-to-log conversions
+Implement color space conversion (DWG → working space → DWG)
+Verify lossless passthrough with no effects enabled
+Implement preset system using OpenDRT's if/else pattern
+Phase 3: Film Emulation Features
+Implement global density using saturation mask
+Implement RGB density curves working in log space
+Implement channel crosstalk matrix
+Implement JP_2499-style hue rotation matrix
+Phase 4: Hue Operations
+Research proper hue angle calculation in opponent space
+Implement Sat→Hue with Gaussian falloff zones
+Implement Lum→Hue with smooth shadow/highlight blending
+Ensure hue operations only trigger when enabled (avoid roundtrip when bypassed)
+Phase 5: Luminance & Saturation
+Implement purity control using inset matrix
+Add mix sliders for all sections
+Phase 6: Testing & Refinement
+Test each preset for pleasing film-like characteristics
+Verify no artifacts at color boundaries
+Verify smooth transitions across all parametric curves
+Test integration with OpenDRT downstream

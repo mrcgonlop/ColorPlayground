@@ -1,143 +1,16 @@
-// FilmLook DCTL - Scene-Referred Film Look Development
-// Works in DaVinci Wide Gamut Log, designed to complement OpenDRT
-// Input: DWG Log to Output: DWG Log (pass to OpenDRT for display rendering)
-//
-// Based on FilmGrade.dctl hybrid approach:
-// - Color pipeline: Linear Rec.709 working space (JP_2499 style)
-// - Hue operations: Opponent color space (OpenDRT style)
+/*----------------------------------------------------------------------
+    FilmLook - Pre-DRT Film Emulation Tool
+    v0.1.0
+
+    A scene-referred look development tool designed to work before OpenDRT.
+    Input: DaVinci Wide Gamut / DaVinci Intermediate (Log)
+    Output: DaVinci Wide Gamut / DaVinci Intermediate (Log)
+
+    Inspired by OpenDRT and JP_2499 approaches.
+----------------------------------------------------------------------*/
 
 // ============================================================================
-// PRESET SYSTEM (loads starting values, then fully editable)
-// ============================================================================
-
-DEFINE_UI_PARAMS(preset, Film Look Preset, DCTLUI_COMBO_BOX, 1, {CUSTOM, NEUTRAL, KODAK_5219, FUJI_ETERNA, EKTACHROME, AGFA_XTR, TEAL_ORANGE, BLEACH_BYPASS}, {Custom, Neutral, Kodak 5219 Vision3, Fuji Eterna 500T, Ektachrome E100, Agfa XTR 100, Teal and Orange, Bleach Bypass})
-
-// ============================================================================
-// GLOBAL DENSITY
-// ============================================================================
-
-DEFINE_UI_PARAMS(enable_global_density, Enable Global Density, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(global_density, Global Density, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.5, 0.01)
-
-// ============================================================================
-// RGB DENSITY CURVES (Film Dye Layers)
-// ============================================================================
-
-DEFINE_UI_PARAMS(enable_density_curves, Enable RGB Density Curves, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(density_red_compress, Red Density Compression, DCTLUI_SLIDER_FLOAT, 0.0, -0.05, 0.05, 0.001)
-DEFINE_UI_PARAMS(density_green_compress, Green Density Compression, DCTLUI_SLIDER_FLOAT, 0.0, -0.05, 0.05, 0.001)
-DEFINE_UI_PARAMS(density_blue_compress, Blue Density Compression, DCTLUI_SLIDER_FLOAT, 0.0, -0.05, 0.05, 0.001)
-DEFINE_UI_PARAMS(density_curves_mix, Density Curves Mix, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.0, 0.01)
-
-// ============================================================================
-// CHANNEL CROSSTALK
-// ============================================================================
-
-DEFINE_UI_PARAMS(enable_crosstalk, Enable Channel Crosstalk, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(crosstalk_rg, Red to Green, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
-DEFINE_UI_PARAMS(crosstalk_rb, Red to Blue, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
-DEFINE_UI_PARAMS(crosstalk_gr, Green to Red, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
-DEFINE_UI_PARAMS(crosstalk_gb, Green to Blue, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
-DEFINE_UI_PARAMS(crosstalk_br, Blue to Red, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
-DEFINE_UI_PARAMS(crosstalk_bg, Blue to Green, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
-DEFINE_UI_PARAMS(crosstalk_mix, Crosstalk Mix, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.0, 0.01)
-
-// ============================================================================
-// OVERALL HUE ROTATION (JP_2499 style)
-// ============================================================================
-
-DEFINE_UI_PARAMS(enable_overall_hue, Enable Overall Hue Rotation, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(overall_hue_r, Overall Hue R, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
-DEFINE_UI_PARAMS(overall_hue_g, Overall Hue G, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
-DEFINE_UI_PARAMS(overall_hue_b, Overall Hue B, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
-DEFINE_UI_PARAMS(overall_hue_mix, Overall Hue Mix, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.0, 0.01)
-
-// ============================================================================
-// SAT TO HUE (Parametric)
-// ============================================================================
-
-DEFINE_UI_PARAMS(enable_sat_to_hue, Enable Sat to Hue, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(sat_hue_strength, Sat to Hue Strength deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-DEFINE_UI_PARAMS(sat_hue_peak, Sat to Hue Peak, DCTLUI_SLIDER_FLOAT, 0.7, 0.3, 1.0, 0.01)
-DEFINE_UI_PARAMS(sat_hue_shape, Sat to Hue Shape, DCTLUI_SLIDER_FLOAT, 1.0, 0.3, 3.0, 0.01)
-DEFINE_UI_PARAMS(sat_hue_mix, Sat to Hue Mix, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.0, 0.01)
-
-// ============================================================================
-// SAT TO HUE PER-ZONE (CMY)
-// ============================================================================
-
-DEFINE_UI_PARAMS(enable_hue_zone_sat_cmy, Enable CMY Sat to Hue, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(sat_hue_cyan, Sat to Hue Cyan deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-DEFINE_UI_PARAMS(sat_hue_magenta, Sat to Hue Magenta deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-DEFINE_UI_PARAMS(sat_hue_yellow, Sat to Hue Yellow deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-
-// ============================================================================
-// SAT TO HUE PER-ZONE (RGB)
-// ============================================================================
-
-DEFINE_UI_PARAMS(enable_hue_zone_sat_rgb, Enable RGB Sat to Hue, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(sat_hue_red, Sat to Hue Red deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-DEFINE_UI_PARAMS(sat_hue_green, Sat to Hue Green deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-DEFINE_UI_PARAMS(sat_hue_blue, Sat to Hue Blue deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-
-// ============================================================================
-// LUM TO HUE (Parametric)
-// ============================================================================
-
-DEFINE_UI_PARAMS(enable_lum_to_hue, Enable Lum to Hue, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(shadow_hue_shift, Shadow Hue Shift deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-DEFINE_UI_PARAMS(highlight_hue_shift, Highlight Hue Shift deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-DEFINE_UI_PARAMS(lum_hue_midpoint, Lum to Hue Midpoint, DCTLUI_SLIDER_FLOAT, 0.18, 0.05, 0.5, 0.01)
-DEFINE_UI_PARAMS(lum_hue_smoothness, Lum to Hue Smoothness, DCTLUI_SLIDER_FLOAT, 2.0, 0.3, 5.0, 0.1)
-DEFINE_UI_PARAMS(lum_hue_mix, Lum to Hue Mix, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.0, 0.01)
-
-// ============================================================================
-// LUM TO HUE PER-ZONE (CMY)
-// ============================================================================
-
-DEFINE_UI_PARAMS(enable_hue_zone_lum_cmy, Enable CMY Lum to Hue, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(lum_hue_cyan, Lum to Hue Cyan deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-DEFINE_UI_PARAMS(lum_hue_magenta, Lum to Hue Magenta deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-DEFINE_UI_PARAMS(lum_hue_yellow, Lum to Hue Yellow deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-
-// ============================================================================
-// LUM TO HUE PER-ZONE (RGB)
-// ============================================================================
-
-DEFINE_UI_PARAMS(enable_hue_zone_lum_rgb, Enable RGB Lum to Hue, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(lum_hue_red, Lum to Hue Red deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-DEFINE_UI_PARAMS(lum_hue_green, Lum to Hue Green deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-DEFINE_UI_PARAMS(lum_hue_blue, Lum to Hue Blue deg, DCTLUI_SLIDER_FLOAT, 0.0, -30.0, 30.0, 0.5)
-
-// ============================================================================
-// LUM TO LUM (Scene-Referred Contrast)
-// ============================================================================
-
-DEFINE_UI_PARAMS(enable_lum_to_lum, Enable Lum to Lum, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(contrast, Contrast, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 2.0, 0.01)
-DEFINE_UI_PARAMS(toe_lift, Toe Lift, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.2, 0.01)
-DEFINE_UI_PARAMS(shoulder_softness, Shoulder Softness, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.3, 0.01)
-DEFINE_UI_PARAMS(lum_pivot, Luminance Pivot, DCTLUI_SLIDER_FLOAT, 0.18, 0.05, 0.5, 0.01)
-DEFINE_UI_PARAMS(lum_to_lum_mix, Lum to Lum Mix, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.0, 0.01)
-
-// ============================================================================
-// PURITY (Scene-Referred Saturation)
-// ============================================================================
-
-DEFINE_UI_PARAMS(enable_purity, Enable Purity, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(purity_red, Purity Red, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
-DEFINE_UI_PARAMS(purity_green, Purity Green, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
-DEFINE_UI_PARAMS(purity_blue, Purity Blue, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
-DEFINE_UI_PARAMS(purity_mix, Purity Mix, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.0, 0.01)
-
-// ============================================================================
-// ADVANCED
-// ============================================================================
-
-DEFINE_UI_PARAMS(use_moment_saturation, Use Moment Space Saturation, DCTLUI_CHECK_BOX, 0)
-
-// ============================================================================
-// MATRIX DEFINITIONS & HELPER FUNCTIONS
+// MATH HELPERS
 // ============================================================================
 
 typedef struct {
@@ -145,35 +18,45 @@ typedef struct {
 } float3x3;
 
 __DEVICE__ float3x3 make_float3x3(float3 a, float3 b, float3 c) {
-    float3x3 m;
-    m.x = a; m.y = b; m.z = c;
-    return m;
+    float3x3 d;
+    d.x = a; d.y = b; d.z = c;
+    return d;
 }
 
-#define matrix_davinciwg_to_xyz \
-    make_float3x3(make_float3(0.700622320175f, 0.148774802685f, 0.101058728993f), \
-                  make_float3(0.274118483067f, 0.873631775379f, -0.147750422359f), \
-                  make_float3(-0.098962903023f, -0.137895315886f, 1.325916051865f))
+__DEVICE__ float3x3 identity_33() {
+    return make_float3x3(
+        make_float3(1.0f, 0.0f, 0.0f),
+        make_float3(0.0f, 1.0f, 0.0f),
+        make_float3(0.0f, 0.0f, 1.0f)
+    );
+}
 
-#define matrix_xyz_to_rec709 \
-    make_float3x3(make_float3(3.2409699419f, -1.53738317757f, -0.498610760293f), \
-                  make_float3(-0.969243636281f, 1.87596750151f, 0.041555057407f), \
-                  make_float3(0.055630079697f, -0.203976958889f, 1.05697151424f))
+__DEVICE__ float3 mv_33_3(float3x3 m, float3 v) {
+    return make_float3(
+        m.x.x * v.x + m.x.y * v.y + m.x.z * v.z,
+        m.y.x * v.x + m.y.y * v.y + m.y.z * v.z,
+        m.z.x * v.x + m.z.y * v.y + m.z.z * v.z
+    );
+}
 
-#define matrix_rec709_to_xyz \
-    make_float3x3(make_float3(0.412390917540f, 0.357584357262f, 0.180480793118f), \
-                  make_float3(0.212639078498f, 0.715168714523f, 0.072192311287f), \
-                  make_float3(0.019330825657f, 0.119194783270f, 0.950532138348f))
+__DEVICE__ float3x3 mult_33_33(float3x3 a, float3x3 b) {
+    return make_float3x3(
+        make_float3(a.x.x*b.x.x + a.x.y*b.y.x + a.x.z*b.z.x,
+                    a.x.x*b.x.y + a.x.y*b.y.y + a.x.z*b.z.y,
+                    a.x.x*b.x.z + a.x.y*b.y.z + a.x.z*b.z.z),
+        make_float3(a.y.x*b.x.x + a.y.y*b.y.x + a.y.z*b.z.x,
+                    a.y.x*b.x.y + a.y.y*b.y.y + a.y.z*b.z.y,
+                    a.y.x*b.x.z + a.y.y*b.y.z + a.y.z*b.z.z),
+        make_float3(a.z.x*b.x.x + a.z.y*b.y.x + a.z.z*b.z.x,
+                    a.z.x*b.x.y + a.z.y*b.y.y + a.z.z*b.z.y,
+                    a.z.x*b.x.z + a.z.y*b.y.z + a.z.z*b.z.z)
+    );
+}
 
-#define matrix_xyz_to_davinciwg \
-    make_float3x3(make_float3(1.51690828f, -0.30806916f, -0.15530531f), \
-                  make_float3(-0.46917558f, 1.31930816f, 0.15153047f), \
-                  make_float3(0.07168483f, 0.08814808f, 0.75964379f))
-
-__DEVICE__ inline float3x3 inv_f33(float3x3 m) {
-    float d = m.x.x * (m.y.y * m.z.z - m.z.y * m.y.z) -
-              m.x.y * (m.y.x * m.z.z - m.y.z * m.z.x) +
-              m.x.z * (m.y.x * m.z.y - m.y.y * m.z.x);
+__DEVICE__ float3x3 inv_33(float3x3 m) {
+    float d = m.x.x * (m.y.y * m.z.z - m.z.y * m.y.z)
+            - m.x.y * (m.y.x * m.z.z - m.y.z * m.z.x)
+            + m.x.z * (m.y.x * m.z.y - m.y.y * m.z.x);
     float id = 1.0f / d;
     float3x3 c;
     c.x.x = id * (m.y.y * m.z.z - m.z.y * m.y.z);
@@ -188,96 +71,173 @@ __DEVICE__ inline float3x3 inv_f33(float3x3 m) {
     return c;
 }
 
-__DEVICE__ inline float3 vdot(float3x3 m, float3 v) {
-    return make_float3(
-        m.x.x * v.x + m.x.y * v.y + m.x.z * v.z,
-        m.y.x * v.x + m.y.y * v.y + m.y.z * v.z,
-        m.z.x * v.x + m.z.y * v.y + m.z.z * v.z);
-}
-
-__DEVICE__ inline float max3(float x, float y, float z) {
+__DEVICE__ float max3(float x, float y, float z) {
     return _fmaxf(x, _fmaxf(y, z));
 }
 
-__DEVICE__ inline float3 maxf3(float b, float3 a) {
+__DEVICE__ float min3(float x, float y, float z) {
+    return _fminf(x, _fminf(y, z));
+}
+
+__DEVICE__ float3 maxf3(float b, float3 a) {
     return make_float3(_fmaxf(a.x, b), _fmaxf(a.y, b), _fmaxf(a.z, b));
 }
 
-__DEVICE__ inline float _sign(float x) {
+__DEVICE__ float3 minf3(float b, float3 a) {
+    return make_float3(_fminf(a.x, b), _fminf(a.y, b), _fminf(a.z, b));
+}
+
+__DEVICE__ float clampf(float x, float lo, float hi) {
+    return _fmaxf(lo, _fminf(x, hi));
+}
+
+__DEVICE__ float3 clampf3(float3 v, float lo, float hi) {
+    return make_float3(clampf(v.x, lo, hi), clampf(v.y, lo, hi), clampf(v.z, lo, hi));
+}
+
+__DEVICE__ float signf(float x) {
     if (x > 0.0f) return 1.0f;
     if (x < 0.0f) return -1.0f;
     return 0.0f;
 }
 
-__DEVICE__ inline float spowf(float a, float b) {
-    return _sign(a) * _powf(_fabs(a), b);
+__DEVICE__ float spowf(float a, float b) {
+    return signf(a) * _powf(_fabs(a), b);
 }
 
-__DEVICE__ inline float smoothstep(float edge0, float edge1, float x) {
-    float t = _fmaxf(0.0f, _fminf(1.0f, (x - edge0) / (edge1 - edge0)));
-    return t * t * (3.0f - 2.0f * t);
+__DEVICE__ float lerpf(float a, float b, float t) {
+    return a + t * (b - a);
 }
 
-__DEVICE__ inline float smootherstep(float edge0, float edge1, float x) {
-    float t = _fmaxf(0.0f, _fminf(1.0f, (x - edge0) / (edge1 - edge0)));
-    return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
+__DEVICE__ float3 lerpf3(float3 a, float3 b, float t) {
+    return make_float3(lerpf(a.x, b.x, t), lerpf(a.y, b.y, t), lerpf(a.z, b.z, t));
 }
 
-__DEVICE__ inline float gaussian_falloff(float x, float center, float width) {
-    float t = (x - center) / width;
-    return _expf(-0.5f * t * t);
+// ============================================================================
+// COLOR SPACE MATRICES
+// ============================================================================
+
+// DaVinci Wide Gamut to XYZ D65
+#define MATRIX_DWG_TO_XYZ make_float3x3( \
+    make_float3(0.700622320175f, 0.148774802685f, 0.101058728993f), \
+    make_float3(0.274118483067f, 0.873631775379f, -0.147750422359f), \
+    make_float3(-0.098962903023f, -0.137895315886f, 1.325916051865f))
+
+// XYZ D65 to DaVinci Wide Gamut
+#define MATRIX_XYZ_TO_DWG make_float3x3( \
+    make_float3(1.51667204f, -0.28147805f, -0.14696363f), \
+    make_float3(-0.46491710f, 1.25142378f, 0.17488461f), \
+    make_float3(0.06484905f, 0.10913934f, 0.76141462f))
+
+// XYZ D65 to Rec.709
+#define MATRIX_XYZ_TO_REC709 make_float3x3( \
+    make_float3(3.2409699419f, -1.53738317757f, -0.498610760293f), \
+    make_float3(-0.969243636281f, 1.87596750151f, 0.041555057407f), \
+    make_float3(0.055630079697f, -0.203976958889f, 1.05697151424f))
+
+// Rec.709 to XYZ D65
+#define MATRIX_REC709_TO_XYZ make_float3x3( \
+    make_float3(0.412390917540f, 0.357584357262f, 0.180480793118f), \
+    make_float3(0.212639078498f, 0.715168714523f, 0.072192311287f), \
+    make_float3(0.019330825657f, 0.119194783270f, 0.950532138348f))
+
+// Direct DWG to Rec.709 (combined matrix)
+#define MATRIX_DWG_TO_REC709 make_float3x3( \
+    make_float3(1.70505094f, -0.62179213f, -0.08325881f), \
+    make_float3(-0.13025642f, 1.14080473f, -0.01054831f), \
+    make_float3(-0.02400496f, -0.12896675f, 1.15297171f))
+
+// Direct Rec.709 to DWG (combined matrix)
+#define MATRIX_REC709_TO_DWG make_float3x3( \
+    make_float3(0.64118807f, 0.34920508f, 0.00960685f), \
+    make_float3(0.07592115f, 0.90828031f, 0.01579854f), \
+    make_float3(0.02055773f, 0.10906734f, 0.87037493f))
+
+// Rec.709 luminance weights
+#define REC709_Y make_float3(0.2126f, 0.7152f, 0.0722f)
+
+// ============================================================================
+// LOG ENCODING - DaVinci Intermediate
+// ============================================================================
+
+__DEVICE__ float di_to_linear(float x) {
+    // DaVinci Intermediate Log to Linear
+    const float A = 0.0075f;
+    const float B = 7.0f;
+    const float C = 0.07329248f;
+    const float M = 10.44426855f;
+    const float LOG_CUT = 0.02740668f;
+
+    return x <= LOG_CUT ? x / M : _exp2f(x / C - B) - A;
 }
 
-__DEVICE__ inline float oetf_davinci_intermediate(float x, int inv) {
+__DEVICE__ float linear_to_di(float x) {
+    // Linear to DaVinci Intermediate Log
     const float A = 0.0075f;
     const float B = 7.0f;
     const float C = 0.07329248f;
     const float M = 10.44426855f;
     const float LIN_CUT = 0.00262409f;
-    const float LOG_CUT = 0.02740668f;
 
-    if (inv == 1) {
-        return x <= LOG_CUT ? x / M : _exp2f(x / C - B) - A;
-    } else {
-        return x <= LIN_CUT ? x * M : (_log2f(x + A) + B) * C;
-    }
+    return x <= LIN_CUT ? x * M : (_log2f(x + A) + B) * C;
 }
 
-__DEVICE__ inline float3x3 transpose_f33(float3x3 A) {
-    float3x3 B;
-    B.x = make_float3(A.x.x, A.y.x, A.z.x);
-    B.y = make_float3(A.x.y, A.y.y, A.z.y);
-    B.z = make_float3(A.x.z, A.y.z, A.z.z);
-    return B;
+__DEVICE__ float3 di_to_linear_f3(float3 v) {
+    return make_float3(di_to_linear(v.x), di_to_linear(v.y), di_to_linear(v.z));
 }
 
-__DEVICE__ inline float3 avgweights(float3x3 mt) {
-    float3 weights = vdot(mt, make_float3(1.0f, 1.0f, 1.0f));
-    mt.x /= weights.x;
-    mt.y /= weights.y;
-    mt.z /= weights.z;
-    mt = transpose_f33(mt);
-    weights = make_float3(
-        mt.x.x + mt.x.y + mt.x.z,
-        mt.y.x + mt.y.y + mt.y.z,
-        mt.z.x + mt.z.y + mt.z.z
-    );
-    weights /= 3.0f;
-    return weights;
+__DEVICE__ float3 linear_to_di_f3(float3 v) {
+    return make_float3(linear_to_di(v.x), linear_to_di(v.y), linear_to_di(v.z));
 }
 
-__DEVICE__ inline float3x3 crosstalkMatrix(float rg, float rb, float gr, float gb, float br, float bg) {
-    float3 redcoeff   = make_float3(1.0f, gr, br);
-    float3 greencoeff = make_float3(rg, 1.0f, bg);
-    float3 bluecoeff  = make_float3(rb, gb, 1.0f);
-    return make_float3x3(redcoeff, greencoeff, bluecoeff);
+// ============================================================================
+// SATURATION MASK (from JP_2499)
+// ============================================================================
+
+__DEVICE__ float saturation_mask(float3 rgb) {
+    // Compute saturation in moment space
+    float avg = (rgb.x + rgb.y + rgb.z) / 3.0f;
+    if (avg == 0.0f) return 0.0f;
+
+    float dx = rgb.x - avg;
+    float dy = rgb.y - avg;
+    float dz = rgb.z - avg;
+    float sat = _sqrtf(dx*dx + dy*dy + dz*dz) / (2.0f * avg);
+
+    return sat;
 }
 
-__DEVICE__ inline float3x3 simpleHueMatrix(float red, float green, float blue) {
-    float3 redcoeff = make_float3(1.0f, green > 0.0f ? green : 0.0f, blue < 0.0f ? -blue : 0.0f);
-    float3 greencoeff = make_float3(red > 0.0f ? red : 0.0f, 1.0f, blue > 0.0f ? blue : 0.0f);
-    float3 bluecoeff = make_float3(red < 0.0f ? -red : 0.0f, green < 0.0f ? -green : 0.0f, 1.0f);
+// ============================================================================
+// LUMINANCE CALCULATION
+// ============================================================================
 
+__DEVICE__ float luminance_rec709(float3 rgb) {
+    return rgb.x * REC709_Y.x + rgb.y * REC709_Y.y + rgb.z * REC709_Y.z;
+}
+
+// ============================================================================
+// HUE ROTATION MATRIX (JP_2499 style)
+// ============================================================================
+
+__DEVICE__ float3x3 hue_rotation_matrix(float rot_r, float rot_g, float rot_b) {
+    // Creates a white-balanced hue rotation matrix
+    // Positive rot_r shifts red toward yellow, negative toward magenta
+    // Positive rot_g shifts green toward yellow, negative toward cyan
+    // Positive rot_b shifts blue toward cyan, negative toward magenta
+
+    float3 redcoeff = make_float3(1.0f,
+        rot_g > 0.0f ? rot_g : 0.0f,
+        rot_b < 0.0f ? -rot_b : 0.0f);
+    float3 greencoeff = make_float3(
+        rot_r > 0.0f ? rot_r : 0.0f,
+        1.0f,
+        rot_b > 0.0f ? rot_b : 0.0f);
+    float3 bluecoeff = make_float3(
+        rot_r < 0.0f ? -rot_r : 0.0f,
+        rot_g < 0.0f ? -rot_g : 0.0f,
+        1.0f);
+
+    // Normalize to preserve white
     float3 white;
     white.x = 1.0f + redcoeff.y + redcoeff.z;
     white.y = greencoeff.x + 1.0f + greencoeff.z;
@@ -290,186 +250,272 @@ __DEVICE__ inline float3x3 simpleHueMatrix(float red, float green, float blue) {
     return make_float3x3(redcoeff, greencoeff, bluecoeff);
 }
 
-__DEVICE__ inline float3x3 simpleInsetMatrix(float red, float green, float blue, int inv) {
-    float gain_coef = 1.0f + red + green + blue;
-    float3 redcoeff = make_float3(1.0f + red, green, blue) / gain_coef;
-    float3 greencoeff = make_float3(red, 1.0f + green, blue) / gain_coef;
-    float3 bluecoeff = make_float3(red, green, 1.0f + blue) / gain_coef;
-    float3x3 M = make_float3x3(redcoeff, greencoeff, bluecoeff);
-    M = inv ? inv_f33(M) : M;
-    return M;
-}
+// ============================================================================
+// PURITY/SATURATION INSET MATRIX (JP_2499 style)
+// ============================================================================
 
-__DEVICE__ inline float satmask(float3 rgb) {
-    float3x3 inset = simpleInsetMatrix(0.1f, 0.7f, 0.2f, 0);
-    rgb = vdot(inset, rgb);
-    float avg = (rgb.x + rgb.y + rgb.z) / 3.0f;
-    float saturation = avg == 0.0f ? 0.0f :
-        _sqrtf((rgb.x - avg) * (rgb.x - avg) +
-               (rgb.y - avg) * (rgb.y - avg) +
-               (rgb.z - avg) * (rgb.z - avg)) / (2.0f * avg);
-    return saturation;
-}
+__DEVICE__ float3x3 purity_matrix(float r, float g, float b, int inv) {
+    // Increase/decrease purity of individual primaries
+    float gain = 1.0f + r + g + b;
 
-__DEVICE__ inline float2 opponent(float3 rgb) {
-    return make_float2(rgb.x - rgb.z, rgb.y - (rgb.x + rgb.z) / 2.0f);
-}
+    float3 redcoeff = make_float3(1.0f + r, g, b) / gain;
+    float3 greencoeff = make_float3(r, 1.0f + g, b) / gain;
+    float3 bluecoeff = make_float3(r, g, 1.0f + b) / gain;
 
-__DEVICE__ inline float3 opponent_to_rgb(float2 opp, float lum) {
-    float b = lum - opp.y / 3.0f - opp.x / 2.0f;
-    float r = b + opp.x;
-    float g = opp.y + (r + b) / 2.0f;
-    return make_float3(r, g, b);
-}
+    float3x3 m = make_float3x3(redcoeff, greencoeff, bluecoeff);
 
-__DEVICE__ inline float achromatic_distance(float2 opp) {
-    return _sqrtf(_fmaxf(0.0f, opp.x * opp.x + opp.y * opp.y)) / 2.0f;
-}
-
-__DEVICE__ inline float2 rotate_hue(float2 opp, float rotation) {
-    float radius = _sqrtf(_fmaxf(0.0f, opp.x * opp.x + opp.y * opp.y));
-    if (radius < 1e-6f) return opp;
-    float hue = _atan2f(opp.y, opp.x);
-    hue += rotation;
-    return make_float2(radius * _cosf(hue), radius * _sinf(hue));
-}
-
-// Calculate hue angle in opponent space, normalized to 0-360 range
-// Aligns with standard color wheel: Red=0, Yellow=60, Green=120, Cyan=180, Blue=240, Magenta=300
-__DEVICE__ inline float opponent_hue_deg(float2 opp) {
-    const float PI = 3.14159265359f;
-    // atan2(opp.x, opp.y) gives angle where:
-    // - opp.x = R-B (positive = more red/yellow, negative = more blue/cyan)
-    // - opp.y = G-(R+B)/2 (positive = green, negative = magenta)
-    // Add rotation to align red at 0 degrees (OpenDRT uses 1.10714931f radians offset)
-    float hue = _atan2f(opp.x, opp.y);  // Note: swapped from (opp.y, opp.x) to align properly
-    float hue_deg = hue * 180.0f / PI;
-    // Rotate so Red=0 (in opponent space, pure red is at ~-63 degrees from atan2(1, -0.5))
-    hue_deg = hue_deg + 63.43f;  // Offset to align red at 0
-    if (hue_deg < 0.0f) hue_deg += 360.0f;
-    if (hue_deg >= 360.0f) hue_deg -= 360.0f;
-    return hue_deg;
-}
-
-__DEVICE__ inline float3 get_hue_zone_weights_cmy(float2 opp) {
-    float hue_deg = opponent_hue_deg(opp);
-
-    // CMY at 60 (Yellow), 180 (Cyan), 300 (Magenta)
-    float weight_yellow = gaussian_falloff(hue_deg, 60.0f, 60.0f);
-    if (hue_deg > 300.0f) weight_yellow += gaussian_falloff(hue_deg - 360.0f, 60.0f, 60.0f);
-    float weight_cyan = gaussian_falloff(hue_deg, 180.0f, 60.0f);
-    float weight_magenta = gaussian_falloff(hue_deg, 300.0f, 60.0f);
-    if (hue_deg < 60.0f) weight_magenta += gaussian_falloff(hue_deg + 360.0f, 300.0f, 60.0f);
-
-    float total = weight_cyan + weight_magenta + weight_yellow;
-    if (total > 0.001f) {
-        weight_cyan /= total;
-        weight_magenta /= total;
-        weight_yellow /= total;
-    }
-    return make_float3(weight_cyan, weight_magenta, weight_yellow);
-}
-
-__DEVICE__ inline float3 get_hue_zone_weights_rgb(float2 opp) {
-    float hue_deg = opponent_hue_deg(opp);
-
-    // RGB at 0 (Red), 120 (Green), 240 (Blue)
-    float weight_red = gaussian_falloff(hue_deg, 0.0f, 60.0f);
-    if (hue_deg > 300.0f) weight_red += gaussian_falloff(hue_deg - 360.0f, 0.0f, 60.0f);
-    float weight_green = gaussian_falloff(hue_deg, 120.0f, 60.0f);
-    float weight_blue = gaussian_falloff(hue_deg, 240.0f, 60.0f);
-
-    float total = weight_red + weight_green + weight_blue;
-    if (total > 0.001f) {
-        weight_red /= total;
-        weight_green /= total;
-        weight_blue /= total;
-    }
-    return make_float3(weight_red, weight_green, weight_blue);
+    return inv ? inv_33(m) : m;
 }
 
 // ============================================================================
-// PARAMETRIC CURVE FUNCTIONS
+// CROSSTALK MATRIX
 // ============================================================================
 
-__DEVICE__ float parametric_sat_to_hue(float sat, float strength, float peak, float shape) {
-    if (_fabs(strength) < 0.01f) return 0.0f;
-    float x = _fminf(sat / _fmaxf(peak, 0.01f), 2.0f);
-    float t = _fminf(x, 1.0f);
-    t = smootherstep(0.0f, 1.0f, t);
-    float curve = _powf(t, 1.0f / _fmaxf(shape, 0.1f));
-    if (x > 1.0f) {
-        float overshoot = x - 1.0f;
-        float decay = 1.0f - smootherstep(0.0f, 1.0f, _fminf(overshoot, 1.0f)) * 0.3f;
-        curve *= decay;
-    }
-    return curve * strength;
-}
+__DEVICE__ float3x3 crosstalk_matrix(float rg, float rb, float gr, float gb, float br, float bg) {
+    // Creates a crosstalk matrix where each channel bleeds into others
+    // rg = red bleeding into green, rb = red bleeding into blue, etc.
 
-__DEVICE__ float parametric_lum_to_hue(float lum, float shadow_shift, float highlight_shift,
-                                        float midpoint, float smoothness) {
-    float t = (lum - midpoint) / (_fmaxf(smoothness * midpoint, 0.01f));
-    float blend = 0.5f + 0.5f * _tanhf(t);
-    blend = smootherstep(0.0f, 1.0f, blend);
-    return shadow_shift * (1.0f - blend) + highlight_shift * blend;
-}
+    float3 r_row = make_float3(1.0f - rg - rb, rg, rb);
+    float3 g_row = make_float3(gr, 1.0f - gr - gb, gb);
+    float3 b_row = make_float3(br, bg, 1.0f - br - bg);
 
-// FIXED: RGB Density - works in log space to preserve hue
-__DEVICE__ float parametric_density_curve(float x, float compression) {
-    if (_fabs(compression) < 0.0001f) return x;
-
-    // Work in log space to preserve hue relationships
-    // This simulates film dye density which is logarithmic
-    float safe_x = _fmaxf(x, 0.0001f);
-    float log_x = _log2f(safe_x);
-
-    // Apply compression in log space
-    // compression > 0: adds density (darkens)
-    // compression < 0: removes density (brightens)
-    float log_result = log_x - compression * 5.0f;
-
-    // Back to linear
-    float result = _exp2f(log_result);
-
-    return _fmaxf(result, 0.0f);
-}
-
-__DEVICE__ float parametric_lum_to_lum(float lum, float contrast, float toe_lift,
-                                        float shoulder_softness, float pivot) {
-    float x = _fmaxf(lum, 0.0f) / _fmaxf(pivot, 0.01f);
-    float y = _powf(x, contrast);
-    float out = y * pivot;
-
-    if (toe_lift > 0.0f) {
-        float toe_blend = gaussian_falloff(lum, 0.0f, 0.1f);
-        out = out + toe_lift * toe_blend;
-    }
-
-    if (shoulder_softness > 0.0f) {
-        float shoulder_start = 0.7f;
-        float shoulder_blend = smootherstep(shoulder_start, 1.0f, lum);
-        float compression_amount = shoulder_softness * 0.5f;
-        float compressed = 1.0f - (1.0f - out) * (1.0f - compression_amount * shoulder_blend);
-        out = out * (1.0f - shoulder_blend) + compressed * shoulder_blend;
-    }
-
-    return _fmaxf(out, 0.0f);
+    return make_float3x3(r_row, g_row, b_row);
 }
 
 // ============================================================================
-// DIRECT DWG<->REC709 MATRICES (avoid XYZ intermediate for precision)
-// Computed as: DWG_to_XYZ * XYZ_to_Rec709 and Rec709_to_XYZ * XYZ_to_DWG
+// GLOBAL DENSITY
 // ============================================================================
 
-#define matrix_davinciwg_to_rec709 \
-    make_float3x3(make_float3(1.89861470f, -0.79217604f, -0.10643869f), \
-                  make_float3(-0.16894877f, 1.48897554f, -0.32002700f), \
-                  make_float3(-0.12153915f, -0.31567582f, 1.43721508f))
+__DEVICE__ float3 apply_density(float3 rgb, float density) {
+    // Darken saturated colors - film dye density effect
+    // More saturated = more light blocked
+    float sat = saturation_mask(rgb);
+    float factor = _powf(1.0f / (1.0f + 0.5f * sat * sat), density);
+    return rgb * factor;
+}
 
-#define matrix_rec709_to_davinciwg \
-    make_float3x3(make_float3(0.56276751f, 0.32351661f, 0.11371596f), \
-                  make_float3(0.07775465f, 0.74957746f, 0.17266805f), \
-                  make_float3(0.06466920f, 0.19199869f, 0.74333207f))
+// ============================================================================
+// RGB DENSITY CURVES (per-channel in log space)
+// ============================================================================
+
+__DEVICE__ float3 apply_rgb_density(float3 log_rgb, float r_dens, float g_dens, float b_dens) {
+    // Apply per-channel density adjustments in log space
+    // Works like density curves - affects mid-to-high values more
+    // Positive = more density (darker), Negative = less density (lighter)
+
+    float3 result;
+    result.x = log_rgb.x - r_dens * log_rgb.x * 0.5f;
+    result.y = log_rgb.y - g_dens * log_rgb.y * 0.5f;
+    result.z = log_rgb.z - b_dens * log_rgb.z * 0.5f;
+
+    return result;
+}
+
+// ============================================================================
+// CONTRAST CURVE (Scene-referred)
+// ============================================================================
+
+__DEVICE__ float3 apply_contrast(float3 rgb, float contrast, float pivot, float toe_lift, float shoulder_soft) {
+    // Scene-referred contrast around a pivot point
+    // Works in linear space
+
+    if (contrast == 1.0f && toe_lift == 0.0f && shoulder_soft == 0.0f) return rgb;
+
+    float3 result;
+
+    for (int i = 0; i < 3; i++) {
+        float x = (i == 0) ? rgb.x : ((i == 1) ? rgb.y : rgb.z);
+        float y;
+
+        // Pivot-based power function
+        if (x > 0.0f) {
+            y = pivot * spowf(x / pivot, contrast);
+
+            // Toe lift (lift shadows)
+            if (toe_lift > 0.0f && x < pivot) {
+                float t = x / pivot;
+                float lift = toe_lift * (1.0f - t) * (1.0f - t);
+                y = y + lift * pivot * 0.1f;
+            }
+
+            // Shoulder softness (compress highlights)
+            if (shoulder_soft > 0.0f && x > pivot) {
+                float excess = (y - pivot) / pivot;
+                float soft = 1.0f / (1.0f + shoulder_soft * excess);
+                y = pivot + (y - pivot) * soft;
+            }
+        } else {
+            y = x;
+        }
+
+        if (i == 0) result.x = y;
+        else if (i == 1) result.y = y;
+        else result.z = y;
+    }
+
+    return result;
+}
+
+// ============================================================================
+// HUE ANGLE CALCULATION (in opponent space)
+// ============================================================================
+
+__DEVICE__ float hue_angle(float3 rgb) {
+    // Calculate hue angle in radians [0, 2*PI]
+    float a = 0.5f * (2.0f * rgb.x - rgb.y - rgb.z);
+    float b = (rgb.y - rgb.z) * 0.86602540378f; // sqrt(3)/2
+    float h = _atan2f(b, a);
+    if (h < 0.0f) h += 6.28318530718f; // 2*PI
+    return h;
+}
+
+// ============================================================================
+// GAUSSIAN FALLOFF FOR HUE ZONES
+// ============================================================================
+
+__DEVICE__ float gaussian_weight(float x, float center, float width) {
+    float d = x - center;
+    // Handle wraparound for hue
+    if (d > 3.14159265359f) d -= 6.28318530718f;
+    if (d < -3.14159265359f) d += 6.28318530718f;
+    return _expf(-d * d / (2.0f * width * width));
+}
+
+// ============================================================================
+// SATURATION-TO-HUE ROTATION
+// ============================================================================
+
+__DEVICE__ float3 sat_to_hue_rotate(float3 rgb, float strength, float peak_sat, float shape,
+                                      float cyan, float magenta, float yellow,
+                                      float red, float green, float blue) {
+    if (strength == 0.0f && cyan == 0.0f && magenta == 0.0f && yellow == 0.0f &&
+        red == 0.0f && green == 0.0f && blue == 0.0f) return rgb;
+
+    float sat = saturation_mask(rgb);
+    float hue = hue_angle(rgb);
+
+    // Global saturation-based rotation
+    float sat_factor = _expf(-_powf((sat - peak_sat) / _fmaxf(shape, 0.01f), 2.0f));
+    float rotation = strength * sat_factor;
+
+    // Per-zone rotations (hue positions: R=0, Y=PI/3, G=2PI/3, C=PI, B=4PI/3, M=5PI/3)
+    float PI = 3.14159265359f;
+    rotation += red * gaussian_weight(hue, 0.0f, 0.5f);
+    rotation += yellow * gaussian_weight(hue, PI / 3.0f, 0.5f);
+    rotation += green * gaussian_weight(hue, 2.0f * PI / 3.0f, 0.5f);
+    rotation += cyan * gaussian_weight(hue, PI, 0.5f);
+    rotation += blue * gaussian_weight(hue, 4.0f * PI / 3.0f, 0.5f);
+    rotation += magenta * gaussian_weight(hue, 5.0f * PI / 3.0f, 0.5f);
+
+    // Apply rotation via matrix
+    float3x3 rot = hue_rotation_matrix(rotation, rotation, rotation);
+    return mv_33_3(rot, rgb);
+}
+
+// ============================================================================
+// LUMINANCE-TO-HUE ROTATION
+// ============================================================================
+
+__DEVICE__ float3 lum_to_hue_rotate(float3 rgb, float shadow_shift, float highlight_shift,
+                                      float midpoint, float smoothness,
+                                      float cyan, float magenta, float yellow,
+                                      float red, float green, float blue) {
+    if (shadow_shift == 0.0f && highlight_shift == 0.0f &&
+        cyan == 0.0f && magenta == 0.0f && yellow == 0.0f &&
+        red == 0.0f && green == 0.0f && blue == 0.0f) return rgb;
+
+    float lum = luminance_rec709(rgb);
+    float hue = hue_angle(rgb);
+
+    // Shadow/highlight blend based on luminance
+    float shadow_weight = 1.0f / (1.0f + _expf((lum - midpoint) * smoothness * 10.0f));
+    float highlight_weight = 1.0f - shadow_weight;
+
+    float rotation = shadow_shift * shadow_weight + highlight_shift * highlight_weight;
+
+    // Per-zone rotations
+    float PI = 3.14159265359f;
+    float zone_factor = shadow_weight + highlight_weight * 0.5f; // Blend zone effect
+    rotation += red * gaussian_weight(hue, 0.0f, 0.5f) * zone_factor;
+    rotation += yellow * gaussian_weight(hue, PI / 3.0f, 0.5f) * zone_factor;
+    rotation += green * gaussian_weight(hue, 2.0f * PI / 3.0f, 0.5f) * zone_factor;
+    rotation += cyan * gaussian_weight(hue, PI, 0.5f) * zone_factor;
+    rotation += blue * gaussian_weight(hue, 4.0f * PI / 3.0f, 0.5f) * zone_factor;
+    rotation += magenta * gaussian_weight(hue, 5.0f * PI / 3.0f, 0.5f) * zone_factor;
+
+    float3x3 rot = hue_rotation_matrix(rotation, rotation, rotation);
+    return mv_33_3(rot, rgb);
+}
+
+// ============================================================================
+// UI PARAMETERS
+// ============================================================================
+
+// Preset Selection
+DEFINE_UI_PARAMS(preset, Film Preset, DCTLUI_COMBO_BOX, 0, {p_none, p_kodak5219, p_kodak2383, p_fuji_eterna, p_portra, p_cinestill}, {None - Manual, Kodak 5219 Vision3, Kodak 2383 Print, Fuji Eterna, Portra 400, Cinestill 800T})
+
+// Global Density
+DEFINE_UI_PARAMS(density_enable, Enable Density, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(density, Global Density, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+
+// RGB Density
+DEFINE_UI_PARAMS(rgb_density_enable, Enable RGB Density, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(r_density, Red Density, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(g_density, Green Density, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(b_density, Blue Density, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.01)
+
+// Channel Crosstalk
+DEFINE_UI_PARAMS(crosstalk_enable, Enable Crosstalk, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(ct_rg, R to G, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_rb, R to B, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_gr, G to R, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_gb, G to B, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_br, B to R, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_bg, B to G, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+
+// Overall Hue Rotation
+DEFINE_UI_PARAMS(hue_enable, Enable Hue Rotation, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(hue_r, Hue Rotate R, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(hue_g, Hue Rotate G, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(hue_b, Hue Rotate B, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+
+// Saturation-to-Hue
+DEFINE_UI_PARAMS(sat_hue_enable, Enable Sat-Hue, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(sat_hue_str, Sat-Hue Strength, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(sat_hue_peak, Sat-Hue Peak, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(sat_hue_shape, Sat-Hue Shape, DCTLUI_SLIDER_FLOAT, 0.3, 0.05, 1.0, 0.01)
+DEFINE_UI_PARAMS(sat_hue_cyan, Sat-Hue Cyan, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(sat_hue_mag, Sat-Hue Magenta, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(sat_hue_yel, Sat-Hue Yellow, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(sat_hue_red, Sat-Hue Red, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(sat_hue_grn, Sat-Hue Green, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(sat_hue_blu, Sat-Hue Blue, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+
+// Luminance-to-Hue
+DEFINE_UI_PARAMS(lum_hue_enable, Enable Lum-Hue, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(lum_hue_shadow, Shadow Hue Shift, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(lum_hue_high, Highlight Hue Shift, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(lum_hue_mid, Lum-Hue Midpoint, DCTLUI_SLIDER_FLOAT, 0.18, 0.01, 1.0, 0.01)
+DEFINE_UI_PARAMS(lum_hue_smooth, Lum-Hue Smoothness, DCTLUI_SLIDER_FLOAT, 1.0, 0.1, 5.0, 0.1)
+DEFINE_UI_PARAMS(lum_hue_cyan, Lum-Hue Cyan, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(lum_hue_mag, Lum-Hue Magenta, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(lum_hue_yel, Lum-Hue Yellow, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(lum_hue_red, Lum-Hue Red, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(lum_hue_grn, Lum-Hue Green, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(lum_hue_blu, Lum-Hue Blue, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+
+// Contrast
+DEFINE_UI_PARAMS(contrast_enable, Enable Contrast, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(contrast, Contrast, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 2.0, 0.01)
+DEFINE_UI_PARAMS(contrast_pivot, Contrast Pivot, DCTLUI_SLIDER_FLOAT, 0.18, 0.01, 1.0, 0.01)
+DEFINE_UI_PARAMS(toe_lift, Toe Lift, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(shoulder_soft, Shoulder Softness, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 2.0, 0.01)
+
+// Purity
+DEFINE_UI_PARAMS(purity_enable, Enable Purity, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(purity_r, Purity R, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 1.0, 0.01)
+DEFINE_UI_PARAMS(purity_g, Purity G, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 1.0, 0.01)
+DEFINE_UI_PARAMS(purity_b, Purity B, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 1.0, 0.01)
 
 // ============================================================================
 // MAIN TRANSFORM
@@ -479,251 +525,109 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
 
     float3 rgb = make_float3(p_R, p_G, p_B);
 
-    // =========================================================================
-    // PRESET SYSTEM (OpenDRT style - preset overrides slider values)
-    // =========================================================================
-    // Local variables that can be overridden by presets
-    float p_global_density = global_density;
-    float p_density_red = density_red_compress;
-    float p_density_green = density_green_compress;
-    float p_density_blue = density_blue_compress;
-    float p_sat_hue_str = sat_hue_strength;
-    float p_sat_hue_pk = sat_hue_peak;
-    float p_sat_hue_sh = sat_hue_shape;
-    float p_shadow_hue = shadow_hue_shift;
-    float p_highlight_hue = highlight_hue_shift;
-    float p_lum_hue_smooth = lum_hue_smoothness;
-    float p_contrast = contrast;
-    float p_toe = toe_lift;
-    float p_shoulder = shoulder_softness;
-    float p_purity_r = purity_red;
-    float p_purity_g = purity_green;
-    float p_purity_b = purity_blue;
-    int p_enable_density = enable_global_density;
-    int p_enable_density_curves = enable_density_curves;
-    int p_enable_sat_hue = enable_sat_to_hue;
-    int p_enable_lum_hue = enable_lum_to_hue;
-    int p_enable_lum_lum = enable_lum_to_lum;
-    int p_enable_purity = enable_purity;
+    // Input is DWG Log (DaVinci Intermediate)
+    // Convert to linear DWG
+    float3 lin = di_to_linear_f3(rgb);
 
-    // NEUTRAL (preset 1) - all defaults, no overrides needed
-    if (preset == 1) {
-        p_global_density = 1.0f;
-        p_density_red = 0.0f, p_density_green = 0.0f, p_density_blue = 0.0f;
-        p_sat_hue_str = 0.0f, p_sat_hue_pk = 0.7f, p_sat_hue_sh = 1.0f;
-        p_shadow_hue = 0.0f, p_highlight_hue = 0.0f, p_lum_hue_smooth = 2.0f;
-        p_contrast = 1.0f, p_toe = 0.0f, p_shoulder = 0.0f;
-        p_purity_r = 0.0f, p_purity_g = 0.0f, p_purity_b = 0.0f;
-        p_enable_density = 0, p_enable_density_curves = 0;
-        p_enable_sat_hue = 0, p_enable_lum_hue = 0, p_enable_lum_lum = 0, p_enable_purity = 0;
-    }
-    // KODAK 5219 Vision3 (preset 2)
-    else if (preset == 2) {
-        p_sat_hue_str = 8.0f, p_sat_hue_pk = 0.7f, p_sat_hue_sh = 1.0f;
-        p_shadow_hue = -5.0f, p_highlight_hue = 10.0f, p_lum_hue_smooth = 2.5f;
-        p_contrast = 1.08f, p_toe = 0.04f, p_shoulder = 0.015f;
-        p_density_red = -0.012f, p_density_green = 0.0f, p_density_blue = 0.012f;
-        p_enable_sat_hue = 1, p_enable_lum_hue = 1, p_enable_lum_lum = 1, p_enable_density_curves = 1;
-    }
-    // FUJI Eterna 500T (preset 3)
-    else if (preset == 3) {
-        p_sat_hue_str = -8.0f, p_sat_hue_pk = 0.6f, p_sat_hue_sh = 1.0f;
-        p_shadow_hue = -12.0f, p_highlight_hue = 5.0f, p_lum_hue_smooth = 2.5f;
-        p_contrast = 0.95f, p_toe = 0.02f, p_shoulder = 0.0f;
-        p_density_red = 0.012f, p_density_green = -0.012f, p_density_blue = 0.0f;
-        p_enable_sat_hue = 1, p_enable_lum_hue = 1, p_enable_lum_lum = 1, p_enable_density_curves = 1;
-    }
-    // EKTACHROME E100 (preset 4)
-    else if (preset == 4) {
-        p_sat_hue_str = 15.0f, p_sat_hue_pk = 0.7f, p_sat_hue_sh = 1.2f;
-        p_shadow_hue = -10.0f, p_highlight_hue = 15.0f, p_lum_hue_smooth = 2.5f;
-        p_contrast = 1.15f, p_toe = 0.0f, p_shoulder = 0.0f;
-        p_density_red = -0.025f, p_density_green = 0.006f, p_density_blue = 0.025f;
-        p_enable_sat_hue = 1, p_enable_lum_hue = 1, p_enable_lum_lum = 1, p_enable_density_curves = 1;
-    }
-    // AGFA XTR 100 (preset 5)
-    else if (preset == 5) {
-        p_sat_hue_str = -6.0f, p_sat_hue_pk = 0.7f, p_sat_hue_sh = 1.0f;
-        p_shadow_hue = 2.0f, p_highlight_hue = -4.0f, p_lum_hue_smooth = 2.5f;
-        p_contrast = 0.92f, p_toe = 0.025f, p_shoulder = 0.0f;
-        p_density_red = -0.008f, p_density_green = 0.012f, p_density_blue = -0.012f;
-        p_purity_r = -0.08f, p_purity_g = 0.08f, p_purity_b = -0.08f;
-        p_enable_sat_hue = 1, p_enable_lum_hue = 1, p_enable_lum_lum = 1, p_enable_density_curves = 1, p_enable_purity = 1;
-    }
-    // TEAL & ORANGE (preset 6)
-    else if (preset == 6) {
-        p_sat_hue_str = 5.0f, p_sat_hue_pk = 0.7f, p_sat_hue_sh = 1.0f;
-        p_shadow_hue = -20.0f, p_highlight_hue = 18.0f, p_lum_hue_smooth = 3.0f;
-        p_contrast = 1.12f, p_toe = 0.0f, p_shoulder = 0.0f;
-        p_density_red = -0.028f, p_density_green = -0.012f, p_density_blue = 0.028f;
-        p_enable_sat_hue = 1, p_enable_lum_hue = 1, p_enable_lum_lum = 1, p_enable_density_curves = 1;
-    }
-    // BLEACH BYPASS (preset 7)
-    else if (preset == 7) {
-        p_sat_hue_str = -12.0f, p_sat_hue_pk = 0.7f, p_sat_hue_sh = 1.0f;
-        p_shadow_hue = -6.0f, p_highlight_hue = -2.0f, p_lum_hue_smooth = 2.5f;
-        p_contrast = 1.25f, p_toe = 0.0f, p_shoulder = 0.0f;
-        p_density_red = -0.025f, p_density_green = -0.020f, p_density_blue = 0.008f;
-        p_purity_r = -0.18f, p_purity_g = -0.18f, p_purity_b = -0.12f;
-        p_enable_sat_hue = 1, p_enable_lum_hue = 1, p_enable_lum_lum = 1, p_enable_density_curves = 1, p_enable_purity = 1;
+    // Convert to working space (Linear Rec.709)
+    float3 work = mv_33_3(MATRIX_DWG_TO_REC709, lin);
+
+    // ========== PRESET LOADING ==========
+    float _density = density;
+    float _r_dens = r_density, _g_dens = g_density, _b_dens = b_density;
+    float _ct_rg = ct_rg, _ct_rb = ct_rb, _ct_gr = ct_gr, _ct_gb = ct_gb, _ct_br = ct_br, _ct_bg = ct_bg;
+    float _hue_r = hue_r, _hue_g = hue_g, _hue_b = hue_b;
+    float _purity_r = purity_r, _purity_g = purity_g, _purity_b = purity_b;
+    int _density_en = density_enable, _rgb_dens_en = rgb_density_enable;
+    int _crosstalk_en = crosstalk_enable, _hue_en = hue_enable, _purity_en = purity_enable;
+
+    if (preset == p_kodak5219) {
+        // Kodak Vision3 5219 500T - warm, rich shadows, cyan-ish highlights
+        _density = 0.8f; _density_en = 1;
+        _hue_r = 0.05f; _hue_g = 0.02f; _hue_b = 0.15f; _hue_en = 1;
+        _ct_rg = 0.02f; _ct_gb = 0.03f; _crosstalk_en = 1;
+        _purity_r = 0.2f; _purity_g = 0.1f; _purity_b = 0.15f; _purity_en = 1;
+    } else if (preset == p_kodak2383) {
+        // Kodak 2383 Print Stock - high contrast, punchy
+        _density = 1.2f; _density_en = 1;
+        _hue_r = 0.08f; _hue_g = -0.05f; _hue_b = 0.2f; _hue_en = 1;
+        _purity_r = 0.3f; _purity_g = 0.15f; _purity_b = 0.1f; _purity_en = 1;
+    } else if (preset == p_fuji_eterna) {
+        // Fuji Eterna - cooler, more neutral greens
+        _density = 0.6f; _density_en = 1;
+        _hue_r = -0.02f; _hue_g = -0.08f; _hue_b = 0.1f; _hue_en = 1;
+        _ct_gb = 0.02f; _ct_bg = 0.01f; _crosstalk_en = 1;
+        _purity_r = 0.1f; _purity_g = 0.2f; _purity_b = 0.25f; _purity_en = 1;
+    } else if (preset == p_portra) {
+        // Portra 400 - warm skin tones, pastel-ish
+        _density = 0.4f; _density_en = 1;
+        _hue_r = 0.1f; _hue_g = 0.05f; _hue_b = 0.0f; _hue_en = 1;
+        _purity_r = 0.15f; _purity_g = 0.05f; _purity_b = -0.1f; _purity_en = 1;
+    } else if (preset == p_cinestill) {
+        // Cinestill 800T - tungsten balanced, halation-ready
+        _density = 0.7f; _density_en = 1;
+        _hue_r = 0.12f; _hue_g = 0.0f; _hue_b = 0.25f; _hue_en = 1;
+        _ct_rg = 0.03f; _ct_rb = 0.01f; _crosstalk_en = 1;
+        _purity_r = 0.35f; _purity_g = 0.1f; _purity_b = 0.2f; _purity_en = 1;
     }
 
-    // LOG TO LINEAR
-    rgb.x = oetf_davinci_intermediate(rgb.x, 1);
-    rgb.y = oetf_davinci_intermediate(rgb.y, 1);
-    rgb.z = oetf_davinci_intermediate(rgb.z, 1);
+    // ========== APPLY EFFECTS ==========
 
-    // DWG TO REC.709 (direct matrix, no XYZ intermediate)
-    rgb = vdot(matrix_davinciwg_to_rec709, rgb);
-
-    // GLOBAL DENSITY
-    if (p_enable_density) {
-        float satm = satmask(rgb);
-        float density_multiplier = _powf(1.0f / (1.0f + 0.5f * satm * satm), p_global_density);
-        rgb *= density_multiplier;
+    // 1. Global Density (in linear)
+    if (_density_en) {
+        work = apply_density(work, _density);
     }
 
-    // CHANNEL CROSSTALK
-    if (enable_crosstalk) {
-        float3 rgb_pre = rgb;
-        float3x3 ct_matrix = crosstalkMatrix(crosstalk_rg, crosstalk_rb, crosstalk_gr,
-                                              crosstalk_gb, crosstalk_br, crosstalk_bg);
-        rgb = vdot(ct_matrix, rgb);
-        rgb = rgb_pre + (rgb - rgb_pre) * crosstalk_mix;
+    // 2. RGB Density (in log space - convert, apply, convert back)
+    if (_rgb_dens_en) {
+        float3 log_work = linear_to_di_f3(work);
+        log_work = apply_rgb_density(log_work, _r_dens, _g_dens, _b_dens);
+        work = di_to_linear_f3(log_work);
     }
 
-    // OVERALL HUE ROTATION
-    if (enable_overall_hue) {
-        float3 rgb_pre = rgb;
-        float3x3 hue_matrix = simpleHueMatrix(overall_hue_r, overall_hue_g, overall_hue_b);
-        rgb = vdot(hue_matrix, rgb);
-        rgb = rgb_pre + (rgb - rgb_pre) * overall_hue_mix;
+    // 3. Channel Crosstalk
+    if (_crosstalk_en) {
+        float3x3 ct = crosstalk_matrix(_ct_rg, _ct_rb, _ct_gr, _ct_gb, _ct_br, _ct_bg);
+        work = mv_33_3(ct, work);
     }
 
-    // RGB DENSITY CURVES
-    if (p_enable_density_curves) {
-        float3 rgb_pre = rgb;
-        rgb.x = parametric_density_curve(rgb.x, p_density_red);
-        rgb.y = parametric_density_curve(rgb.y, p_density_green);
-        rgb.z = parametric_density_curve(rgb.z, p_density_blue);
-        rgb = rgb_pre + (rgb - rgb_pre) * density_curves_mix;
-        rgb = maxf3(0.0f, rgb);
+    // 4. Overall Hue Rotation
+    if (_hue_en) {
+        float3x3 hue_mat = hue_rotation_matrix(_hue_r, _hue_g, _hue_b);
+        work = mv_33_3(hue_mat, work);
     }
 
-    // OPPONENT SPACE HUE OPERATIONS
-    // Only enter opponent space if hue operations are enabled (avoid lossy roundtrip)
-    int do_hue_ops = p_enable_sat_hue || enable_hue_zone_sat_cmy || enable_hue_zone_sat_rgb ||
-                     p_enable_lum_hue || enable_hue_zone_lum_cmy || enable_hue_zone_lum_rgb;
-
-    if (do_hue_ops) {
-        float2 opp = opponent(rgb);
-        float lum = (rgb.x + rgb.y + rgb.z) / 3.0f;
-
-        float sat;
-        if (use_moment_saturation) {
-            sat = satmask(rgb);
-        } else {
-            sat = achromatic_distance(opp);
-        }
-
-        float sat_blend = smootherstep(0.0f, 0.2f, sat);
-        float3 hue_weights_cmy = get_hue_zone_weights_cmy(opp);
-        float3 hue_weights_rgb = get_hue_zone_weights_rgb(opp);
-
-        float total_hue_shift = 0.0f;
-
-        // SAT TO HUE
-        if ((p_enable_sat_hue || enable_hue_zone_sat_cmy || enable_hue_zone_sat_rgb) && sat > 0.001f) {
-            float hue_shift_deg = 0.0f;
-
-            if (p_enable_sat_hue) {
-                hue_shift_deg += parametric_sat_to_hue(sat, p_sat_hue_str, p_sat_hue_pk, p_sat_hue_sh);
-            }
-
-            if (enable_hue_zone_sat_cmy) {
-                float zone_shift = hue_weights_cmy.x * sat_hue_cyan +
-                                  hue_weights_cmy.y * sat_hue_magenta +
-                                  hue_weights_cmy.z * sat_hue_yellow;
-                hue_shift_deg += zone_shift * sat_blend;
-            }
-
-            if (enable_hue_zone_sat_rgb) {
-                float zone_shift = hue_weights_rgb.x * sat_hue_red +
-                                  hue_weights_rgb.y * sat_hue_green +
-                                  hue_weights_rgb.z * sat_hue_blue;
-                hue_shift_deg += zone_shift * sat_blend;
-            }
-
-            if (_fabs(hue_shift_deg) > 0.01f) {
-                const float DEG_TO_RAD = 3.14159265359f / 180.0f;
-                total_hue_shift += hue_shift_deg * DEG_TO_RAD * (p_enable_sat_hue ? sat_hue_mix : 1.0f);
-            }
-        }
-
-        // LUM TO HUE
-        if ((p_enable_lum_hue || enable_hue_zone_lum_cmy || enable_hue_zone_lum_rgb) && sat > 0.001f) {
-            float hue_shift_deg = 0.0f;
-
-            if (p_enable_lum_hue) {
-                hue_shift_deg += parametric_lum_to_hue(lum, p_shadow_hue, p_highlight_hue,
-                                                       lum_hue_midpoint, p_lum_hue_smooth);
-            }
-
-            if (enable_hue_zone_lum_cmy) {
-                float zone_shift = hue_weights_cmy.x * lum_hue_cyan +
-                                  hue_weights_cmy.y * lum_hue_magenta +
-                                  hue_weights_cmy.z * lum_hue_yellow;
-                hue_shift_deg += zone_shift * sat_blend;
-            }
-
-            if (enable_hue_zone_lum_rgb) {
-                float zone_shift = hue_weights_rgb.x * lum_hue_red +
-                                  hue_weights_rgb.y * lum_hue_green +
-                                  hue_weights_rgb.z * lum_hue_blue;
-                hue_shift_deg += zone_shift * sat_blend;
-            }
-
-            if (_fabs(hue_shift_deg) > 0.01f) {
-                const float DEG_TO_RAD = 3.14159265359f / 180.0f;
-                total_hue_shift += hue_shift_deg * DEG_TO_RAD * (p_enable_lum_hue ? lum_hue_mix : 1.0f);
-            }
-        }
-
-        if (_fabs(total_hue_shift) > 0.001f) {
-            opp = rotate_hue(opp, total_hue_shift);
-        }
-
-        rgb = opponent_to_rgb(opp, lum);
-        rgb = maxf3(0.0f, rgb);
+    // 5. Saturation-to-Hue Rotation
+    if (sat_hue_enable) {
+        work = sat_to_hue_rotate(work, sat_hue_str, sat_hue_peak, sat_hue_shape,
+                                  sat_hue_cyan, sat_hue_mag, sat_hue_yel,
+                                  sat_hue_red, sat_hue_grn, sat_hue_blu);
     }
 
-    // LUM TO LUM
-    if (p_enable_lum_lum) {
-        float3 weights = avgweights(matrix_rec709_to_xyz);
-        float lum_in = weights.x * rgb.x + weights.y * rgb.y + weights.z * rgb.z;
-        float lum_out = parametric_lum_to_lum(lum_in, p_contrast, p_toe, p_shoulder, lum_pivot);
-        lum_out = lum_in + (lum_out - lum_in) * lum_to_lum_mix;
-        if (lum_in > 0.0001f) {
-            float ratio = lum_out / lum_in;
-            rgb *= ratio;
-        }
+    // 6. Luminance-to-Hue Rotation
+    if (lum_hue_enable) {
+        work = lum_to_hue_rotate(work, lum_hue_shadow, lum_hue_high,
+                                  lum_hue_mid, lum_hue_smooth,
+                                  lum_hue_cyan, lum_hue_mag, lum_hue_yel,
+                                  lum_hue_red, lum_hue_grn, lum_hue_blu);
     }
 
-    // PURITY
-    if (p_enable_purity) {
-        float3 rgb_pre = rgb;
-        float3x3 purity_matrix = simpleInsetMatrix(p_purity_r / 10.0f, p_purity_g / 10.0f, p_purity_b / 10.0f, 1);
-        rgb = vdot(purity_matrix, rgb);
-        rgb = rgb_pre + (rgb - rgb_pre) * purity_mix;
+    // 7. Contrast (in linear)
+    if (contrast_enable) {
+        work = apply_contrast(work, contrast, contrast_pivot, toe_lift, shoulder_soft);
     }
 
-    // REC.709 TO DWG (direct matrix, no XYZ intermediate)
-    rgb = vdot(matrix_rec709_to_davinciwg, rgb);
+    // 8. Purity
+    if (_purity_en) {
+        float3x3 pur = purity_matrix(_purity_r / 10.0f, _purity_g / 10.0f, _purity_b / 10.0f, 1);
+        work = mv_33_3(pur, work);
+    }
 
-    // LINEAR TO LOG
-    rgb.x = oetf_davinci_intermediate(rgb.x, 0);
-    rgb.y = oetf_davinci_intermediate(rgb.y, 0);
-    rgb.z = oetf_davinci_intermediate(rgb.z, 0);
+    // Convert back to DWG linear
+    lin = mv_33_3(MATRIX_REC709_TO_DWG, work);
+
+    // Convert to DWG Log (DaVinci Intermediate) for output
+    rgb = linear_to_di_f3(lin);
 
     return rgb;
 }
