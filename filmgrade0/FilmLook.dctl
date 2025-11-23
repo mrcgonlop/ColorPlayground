@@ -334,16 +334,32 @@ __DEVICE__ inline float2 rotate_hue(float2 opp, float rotation) {
     return make_float2(radius * _cosf(hue), radius * _sinf(hue));
 }
 
-__DEVICE__ inline float3 get_hue_zone_weights_cmy(float2 opp) {
+// Calculate hue angle in opponent space, normalized to 0-360 range
+// Aligns with standard color wheel: Red=0, Yellow=60, Green=120, Cyan=180, Blue=240, Magenta=300
+__DEVICE__ inline float opponent_hue_deg(float2 opp) {
     const float PI = 3.14159265359f;
-    float hue = _atan2f(opp.y, opp.x);
+    // atan2(opp.x, opp.y) gives angle where:
+    // - opp.x = R-B (positive = more red/yellow, negative = more blue/cyan)
+    // - opp.y = G-(R+B)/2 (positive = green, negative = magenta)
+    // Add rotation to align red at 0 degrees (OpenDRT uses 1.10714931f radians offset)
+    float hue = _atan2f(opp.x, opp.y);  // Note: swapped from (opp.y, opp.x) to align properly
     float hue_deg = hue * 180.0f / PI;
+    // Rotate so Red=0 (in opponent space, pure red is at ~-63 degrees from atan2(1, -0.5))
+    hue_deg = hue_deg + 63.43f;  // Offset to align red at 0
     if (hue_deg < 0.0f) hue_deg += 360.0f;
+    if (hue_deg >= 360.0f) hue_deg -= 360.0f;
+    return hue_deg;
+}
 
-    float weight_cyan = gaussian_falloff(hue_deg, 180.0f, 80.0f);
-    float weight_yellow = gaussian_falloff(hue_deg, 60.0f, 80.0f);
-    if (hue_deg > 300.0f) weight_yellow += gaussian_falloff(hue_deg - 360.0f, 60.0f, 80.0f);
-    float weight_magenta = gaussian_falloff(hue_deg, 300.0f, 80.0f);
+__DEVICE__ inline float3 get_hue_zone_weights_cmy(float2 opp) {
+    float hue_deg = opponent_hue_deg(opp);
+
+    // CMY at 60 (Yellow), 180 (Cyan), 300 (Magenta)
+    float weight_yellow = gaussian_falloff(hue_deg, 60.0f, 60.0f);
+    if (hue_deg > 300.0f) weight_yellow += gaussian_falloff(hue_deg - 360.0f, 60.0f, 60.0f);
+    float weight_cyan = gaussian_falloff(hue_deg, 180.0f, 60.0f);
+    float weight_magenta = gaussian_falloff(hue_deg, 300.0f, 60.0f);
+    if (hue_deg < 60.0f) weight_magenta += gaussian_falloff(hue_deg + 360.0f, 300.0f, 60.0f);
 
     float total = weight_cyan + weight_magenta + weight_yellow;
     if (total > 0.001f) {
@@ -355,15 +371,13 @@ __DEVICE__ inline float3 get_hue_zone_weights_cmy(float2 opp) {
 }
 
 __DEVICE__ inline float3 get_hue_zone_weights_rgb(float2 opp) {
-    const float PI = 3.14159265359f;
-    float hue = _atan2f(opp.y, opp.x);
-    float hue_deg = hue * 180.0f / PI;
-    if (hue_deg < 0.0f) hue_deg += 360.0f;
+    float hue_deg = opponent_hue_deg(opp);
 
-    float weight_red = gaussian_falloff(hue_deg, 0.0f, 80.0f);
-    if (hue_deg > 300.0f) weight_red += gaussian_falloff(hue_deg - 360.0f, 0.0f, 80.0f);
-    float weight_green = gaussian_falloff(hue_deg, 120.0f, 80.0f);
-    float weight_blue = gaussian_falloff(hue_deg, 240.0f, 80.0f);
+    // RGB at 0 (Red), 120 (Green), 240 (Blue)
+    float weight_red = gaussian_falloff(hue_deg, 0.0f, 60.0f);
+    if (hue_deg > 300.0f) weight_red += gaussian_falloff(hue_deg - 360.0f, 0.0f, 60.0f);
+    float weight_green = gaussian_falloff(hue_deg, 120.0f, 60.0f);
+    float weight_blue = gaussian_falloff(hue_deg, 240.0f, 60.0f);
 
     float total = weight_red + weight_green + weight_blue;
     if (total > 0.001f) {
@@ -448,14 +462,14 @@ __DEVICE__ float parametric_lum_to_lum(float lum, float contrast, float toe_lift
 // ============================================================================
 
 #define matrix_davinciwg_to_rec709 \
-    make_float3x3(make_float3(2.67494379f, -1.25835305f, -0.32167033f), \
-                  make_float3(-1.02429867f, 2.04071193f, -0.01417663f), \
-                  make_float3(0.03174274f, -0.12804994f, 1.09398973f))
+    make_float3x3(make_float3(1.89861470f, -0.79217604f, -0.10643869f), \
+                  make_float3(-0.16894877f, 1.48897554f, -0.32002700f), \
+                  make_float3(-0.12153915f, -0.31567582f, 1.43721508f))
 
 #define matrix_rec709_to_davinciwg \
-    make_float3x3(make_float3(0.46974098f, 0.29004687f, 0.16232738f), \
-                  make_float3(0.23516086f, 0.54809858f, 0.14532879f), \
-                  make_float3(-0.02168362f, 0.06157985f, 0.88127019f))
+    make_float3x3(make_float3(0.56276751f, 0.32351661f, 0.11371596f), \
+                  make_float3(0.07775465f, 0.74957746f, 0.17266805f), \
+                  make_float3(0.06466920f, 0.19199869f, 0.74333207f))
 
 // ============================================================================
 // MAIN TRANSFORM
