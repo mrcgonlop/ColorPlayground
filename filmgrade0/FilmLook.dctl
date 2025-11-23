@@ -301,6 +301,65 @@ __DEVICE__ float3 apply_density(float3 rgb, float density) {
 }
 
 // ============================================================================
+// HIGHLIGHT ROLLOFF (soft shoulder)
+// ============================================================================
+
+__DEVICE__ float3 apply_highlight_rolloff(float3 rgb, float rolloff, float threshold) {
+    // Film doesn't clip hard - highlights compress smoothly
+    // rolloff: strength of compression (0 = none, 1 = strong)
+    // threshold: where rolloff begins (in linear, e.g. 0.5 = mid-gray)
+    if (rolloff <= 0.0f) return rgb;
+
+    float3 result;
+    for (int i = 0; i < 3; i++) {
+        float x = (i == 0) ? rgb.x : ((i == 1) ? rgb.y : rgb.z);
+        float y = x;
+
+        if (x > threshold) {
+            float excess = x - threshold;
+            float compressed = excess / (1.0f + rolloff * excess);
+            y = threshold + compressed;
+        }
+
+        if (i == 0) result.x = y;
+        else if (i == 1) result.y = y;
+        else result.z = y;
+    }
+    return result;
+}
+
+// ============================================================================
+// SATURATION ROLLOFF IN HIGHLIGHTS
+// ============================================================================
+
+__DEVICE__ float3 apply_sat_rolloff(float3 rgb, float strength, float threshold) {
+    // Film desaturates in highlights - dye layers can't block more light
+    if (strength <= 0.0f) return rgb;
+
+    float lum = luminance_dwg(rgb);
+    if (lum <= threshold) return rgb;
+
+    // Blend toward achromatic based on how far into highlights we are
+    float blend = (lum - threshold) / (1.0f + lum - threshold);
+    blend = blend * strength;
+    blend = _fminf(blend, 1.0f);
+
+    float3 gray = make_float3(lum, lum, lum);
+    return lerpf3(rgb, gray, blend);
+}
+
+// ============================================================================
+// BLACK POINT / FOG (lifted blacks with color cast)
+// ============================================================================
+
+__DEVICE__ float3 apply_black_fog(float3 rgb, float fog_level, float3 fog_color) {
+    // Film base + fog gives lifted blacks with a color cast
+    // fog_level: how much to lift blacks (0-0.1 typical)
+    // fog_color: normalized RGB color of the fog
+    return rgb + fog_color * fog_level;
+}
+
+// ============================================================================
 // RGB DENSITY CURVES (per-channel in log space)
 // ============================================================================
 
@@ -456,20 +515,37 @@ DEFINE_UI_PARAMS(sat_hue_blu, Sat-Hue Blue, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5,
 DEFINE_UI_PARAMS(lum_hue_enable, Enable Lum-Hue, DCTLUI_CHECK_BOX, 0)
 DEFINE_UI_PARAMS(lum_hue_shadow, Shadow Hue Shift, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
 DEFINE_UI_PARAMS(lum_hue_high, Highlight Hue Shift, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
-DEFINE_UI_PARAMS(lum_hue_mid, Lum-Hue Midpoint, DCTLUI_SLIDER_FLOAT, 0.18, 0.01, 1.0, 0.01)
+DEFINE_UI_PARAMS(lum_hue_mid, Lum-Hue Midpoint, DCTLUI_SLIDER_FLOAT, 0.18, 0.001, 1.0, 0.01)
 DEFINE_UI_PARAMS(lum_hue_smooth, Lum-Hue Smoothness, DCTLUI_SLIDER_FLOAT, 1.0, 0.1, 5.0, 0.1)
-DEFINE_UI_PARAMS(lum_hue_cyan, Lum-Hue Cyan, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
-DEFINE_UI_PARAMS(lum_hue_mag, Lum-Hue Magenta, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
-DEFINE_UI_PARAMS(lum_hue_yel, Lum-Hue Yellow, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
-DEFINE_UI_PARAMS(lum_hue_red, Lum-Hue Red, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
-DEFINE_UI_PARAMS(lum_hue_grn, Lum-Hue Green, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
-DEFINE_UI_PARAMS(lum_hue_blu, Lum-Hue Blue, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
+DEFINE_UI_PARAMS(lum_hue_cyan, Lum-Hue Cyan, DCTLUI_SLIDER_FLOAT, 0.0, -1.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(lum_hue_mag, Lum-Hue Magenta, DCTLUI_SLIDER_FLOAT, 0.0, -1.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(lum_hue_yel, Lum-Hue Yellow, DCTLUI_SLIDER_FLOAT, 0.0, -1.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(lum_hue_red, Lum-Hue Red, DCTLUI_SLIDER_FLOAT, 0.0, -1.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(lum_hue_grn, Lum-Hue Green, DCTLUI_SLIDER_FLOAT, 0.0, -1.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(lum_hue_blu, Lum-Hue Blue, DCTLUI_SLIDER_FLOAT, 0.0, -1.5, 1.5, 0.01)
 
 // Purity
 DEFINE_UI_PARAMS(purity_enable, Enable Purity, DCTLUI_CHECK_BOX, 0)
 DEFINE_UI_PARAMS(purity_r, Purity R, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 1.0, 0.01)
 DEFINE_UI_PARAMS(purity_g, Purity G, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 1.0, 0.01)
 DEFINE_UI_PARAMS(purity_b, Purity B, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 1.0, 0.01)
+
+// Highlight Rolloff
+DEFINE_UI_PARAMS(rolloff_enable, Enable Highlight Rolloff, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(rolloff_strength, Rolloff Strength, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 4.0, 0.01)
+DEFINE_UI_PARAMS(rolloff_threshold, Rolloff Threshold, DCTLUI_SLIDER_FLOAT, 0.5, 0.001, 4.0, 0.01)
+
+// Saturation Rolloff (highlight desaturation)
+DEFINE_UI_PARAMS(sat_rolloff_enable, Enable Sat Rolloff, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(sat_rolloff_strength, Sat Rolloff Strength, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(sat_rolloff_threshold, Sat Rolloff Threshold, DCTLUI_SLIDER_FLOAT, 0.5, 0.001, 3.0, 0.01)
+
+// Black Fog (lifted blacks)
+DEFINE_UI_PARAMS(fog_enable, Enable Black Fog, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(fog_level, Fog Level, DCTLUI_SLIDER_FLOAT, 0.02, 0.0, 0.1, 0.001)
+DEFINE_UI_PARAMS(fog_r, Fog Red, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(fog_g, Fog Green, DCTLUI_SLIDER_FLOAT, 0.95, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(fog_b, Fog Blue, DCTLUI_SLIDER_FLOAT, 0.9, 0.5, 1.5, 0.01)
 
 // ============================================================================
 // MAIN TRANSFORM
@@ -489,37 +565,64 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     float _ct_rg = ct_rg, _ct_rb = ct_rb, _ct_gr = ct_gr, _ct_gb = ct_gb, _ct_br = ct_br, _ct_bg = ct_bg;
     float _hue_r = hue_r, _hue_g = hue_g, _hue_b = hue_b;
     float _purity_r = purity_r, _purity_g = purity_g, _purity_b = purity_b;
+    float _rolloff_str = rolloff_strength, _rolloff_thresh = rolloff_threshold;
+    float _sat_rolloff_str = sat_rolloff_strength, _sat_rolloff_thresh = sat_rolloff_threshold;
+    float _fog_level = fog_level, _fog_r = fog_r, _fog_g = fog_g, _fog_b = fog_b;
     int _density_en = density_enable, _rgb_dens_en = rgb_density_enable;
     int _crosstalk_en = crosstalk_enable, _hue_en = hue_enable, _purity_en = purity_enable;
+    int _rolloff_en = rolloff_enable, _sat_rolloff_en = sat_rolloff_enable, _fog_en = fog_enable;
 
     if (preset == p_kodak5219) {
-        // Kodak Vision3 5219 500T - warm, rich shadows, cyan-ish highlights
-        _density = 0.8f; _density_en = 1;
-        _hue_r = 0.05f; _hue_g = 0.02f; _hue_b = 0.15f; _hue_en = 1;
-        _ct_rg = 0.02f; _ct_gb = 0.03f; _crosstalk_en = 1;
-        _purity_r = 0.2f; _purity_g = 0.1f; _purity_b = 0.15f; _purity_en = 1;
-    } else if (preset == p_kodak2383) {
-        // Kodak 2383 Print Stock - high contrast, punchy
-        _density = 1.2f; _density_en = 1;
-        _hue_r = 0.08f; _hue_g = -0.05f; _hue_b = 0.2f; _hue_en = 1;
-        _purity_r = 0.3f; _purity_g = 0.15f; _purity_b = 0.1f; _purity_en = 1;
-    } else if (preset == p_fuji_eterna) {
-        // Fuji Eterna - cooler, more neutral greens
+        // Kodak Vision3 5219 500T - Tungsten cinema negative
+        // Known for: rich warm shadows, subtle cyan highlights, natural skin tones
+        // Medium saturation, smooth highlight rolloff, slight warm fog
         _density = 0.6f; _density_en = 1;
-        _hue_r = -0.02f; _hue_g = -0.08f; _hue_b = 0.1f; _hue_en = 1;
-        _ct_gb = 0.02f; _ct_bg = 0.01f; _crosstalk_en = 1;
-        _purity_r = 0.1f; _purity_g = 0.2f; _purity_b = 0.25f; _purity_en = 1;
+        _hue_r = 0.04f; _hue_g = -0.02f; _hue_b = 0.08f; _hue_en = 1;
+        _ct_rg = 0.015f; _ct_gb = 0.02f; _crosstalk_en = 1;
+        _purity_r = 0.15f; _purity_g = 0.08f; _purity_b = 0.12f; _purity_en = 1;
+        _rolloff_str = 0.8f; _rolloff_thresh = 0.6f; _rolloff_en = 1;
+        _sat_rolloff_str = 0.4f; _sat_rolloff_thresh = 0.5f; _sat_rolloff_en = 1;
+        _fog_level = 0.015f; _fog_r = 1.05f; _fog_g = 1.0f; _fog_b = 0.92f; _fog_en = 1;
+    } else if (preset == p_kodak2383) {
+        // Kodak 2383 Print Stock - Cinema print film
+        // Known for: punchy contrast, saturated reds, teal shadows, strong rolloff
+        _density = 0.9f; _density_en = 1;
+        _hue_r = 0.06f; _hue_g = -0.08f; _hue_b = 0.15f; _hue_en = 1;
+        _ct_gr = 0.01f; _ct_gb = 0.025f; _crosstalk_en = 1;
+        _purity_r = 0.25f; _purity_g = 0.1f; _purity_b = 0.08f; _purity_en = 1;
+        _rolloff_str = 1.2f; _rolloff_thresh = 0.5f; _rolloff_en = 1;
+        _sat_rolloff_str = 0.6f; _sat_rolloff_thresh = 0.4f; _sat_rolloff_en = 1;
+        _fog_level = 0.008f; _fog_r = 0.95f; _fog_g = 0.98f; _fog_b = 1.1f; _fog_en = 1;
+    } else if (preset == p_fuji_eterna) {
+        // Fuji Eterna 500 - Japanese cinema negative
+        // Known for: cooler palette, restrained greens, subtle blues, low fog
+        _density = 0.5f; _density_en = 1;
+        _hue_r = -0.03f; _hue_g = -0.06f; _hue_b = 0.05f; _hue_en = 1;
+        _ct_gb = 0.015f; _ct_bg = 0.01f; _crosstalk_en = 1;
+        _purity_r = 0.08f; _purity_g = 0.12f; _purity_b = 0.18f; _purity_en = 1;
+        _rolloff_str = 0.6f; _rolloff_thresh = 0.65f; _rolloff_en = 1;
+        _sat_rolloff_str = 0.35f; _sat_rolloff_thresh = 0.55f; _sat_rolloff_en = 1;
+        _fog_level = 0.01f; _fog_r = 0.92f; _fog_g = 0.97f; _fog_b = 1.05f; _fog_en = 1;
     } else if (preset == p_portra) {
-        // Portra 400 - warm skin tones, pastel-ish
-        _density = 0.4f; _density_en = 1;
-        _hue_r = 0.1f; _hue_g = 0.05f; _hue_b = 0.0f; _hue_en = 1;
-        _purity_r = 0.15f; _purity_g = 0.05f; _purity_b = -0.1f; _purity_en = 1;
+        // Kodak Portra 400 - Portrait/wedding still film
+        // Known for: flattering skin tones, pastel colors, low contrast, warm cast
+        _density = 0.35f; _density_en = 1;
+        _hue_r = 0.08f; _hue_g = 0.03f; _hue_b = -0.02f; _hue_en = 1;
+        _ct_rg = 0.01f; _crosstalk_en = 1;
+        _purity_r = 0.1f; _purity_g = 0.0f; _purity_b = -0.12f; _purity_en = 1;
+        _rolloff_str = 0.4f; _rolloff_thresh = 0.7f; _rolloff_en = 1;
+        _sat_rolloff_str = 0.5f; _sat_rolloff_thresh = 0.45f; _sat_rolloff_en = 1;
+        _fog_level = 0.025f; _fog_r = 1.08f; _fog_g = 1.02f; _fog_b = 0.88f; _fog_en = 1;
     } else if (preset == p_cinestill) {
-        // Cinestill 800T - tungsten balanced, halation-ready
-        _density = 0.7f; _density_en = 1;
-        _hue_r = 0.12f; _hue_g = 0.0f; _hue_b = 0.25f; _hue_en = 1;
-        _ct_rg = 0.03f; _ct_rb = 0.01f; _crosstalk_en = 1;
-        _purity_r = 0.35f; _purity_g = 0.1f; _purity_b = 0.2f; _purity_en = 1;
+        // Cinestill 800T - Remjet-removed cinema stock for still cameras
+        // Known for: halation-ready, tungsten balanced, punchy reds, cyan shadows
+        _density = 0.55f; _density_en = 1;
+        _hue_r = 0.1f; _hue_g = -0.02f; _hue_b = 0.18f; _hue_en = 1;
+        _ct_rg = 0.025f; _ct_rb = 0.01f; _crosstalk_en = 1;
+        _purity_r = 0.3f; _purity_g = 0.05f; _purity_b = 0.15f; _purity_en = 1;
+        _rolloff_str = 0.7f; _rolloff_thresh = 0.55f; _rolloff_en = 1;
+        _sat_rolloff_str = 0.3f; _sat_rolloff_thresh = 0.6f; _sat_rolloff_en = 1;
+        _fog_level = 0.012f; _fog_r = 1.0f; _fog_g = 0.95f; _fog_b = 1.08f; _fog_en = 1;
     }
 
     // ========== APPLY EFFECTS ==========
@@ -567,6 +670,22 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     if (_purity_en) {
         float3x3 pur = purity_matrix(_purity_r / 10.0f, _purity_g / 10.0f, _purity_b / 10.0f, 1);
         work = mv_33_3(pur, work);
+    }
+
+    // 8. Highlight Rolloff (soft clipping)
+    if (_rolloff_en) {
+        work = apply_highlight_rolloff(work, _rolloff_str, _rolloff_thresh);
+    }
+
+    // 9. Saturation Rolloff (desaturate highlights)
+    if (_sat_rolloff_en) {
+        work = apply_sat_rolloff(work, _sat_rolloff_str, _sat_rolloff_thresh);
+    }
+
+    // 10. Black Fog (lifted blacks with color cast)
+    if (_fog_en) {
+        float3 fog_col = make_float3(_fog_r, _fog_g, _fog_b);
+        work = apply_black_fog(work, _fog_level, fog_col);
     }
 
     // Convert back to DWG Log (DaVinci Intermediate) for output
