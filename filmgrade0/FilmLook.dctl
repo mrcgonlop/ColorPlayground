@@ -156,6 +156,9 @@ __DEVICE__ float3 lerpf3(float3 a, float3 b, float t) {
 // Rec.709 luminance weights
 #define REC709_Y make_float3(0.2126f, 0.7152f, 0.0722f)
 
+// DaVinci Wide Gamut luminance weights (from DWG to XYZ Y row)
+#define DWG_Y make_float3(0.274118483067f, 0.873631775379f, -0.147750422359f)
+
 // ============================================================================
 // LOG ENCODING - DaVinci Intermediate
 // ============================================================================
@@ -191,20 +194,18 @@ __DEVICE__ float3 linear_to_di_f3(float3 v) {
 }
 
 // ============================================================================
-// SATURATION MASK (from JP_2499)
+// SATURATION MASK
 // ============================================================================
 
 __DEVICE__ float saturation_mask(float3 rgb) {
-    // Compute saturation in moment space
-    float avg = (rgb.x + rgb.y + rgb.z) / 3.0f;
-    if (avg == 0.0f) return 0.0f;
+    // Compute saturation as distance from achromatic axis
+    float maxc = max3(rgb.x, rgb.y, rgb.z);
+    float minc = min3(rgb.x, rgb.y, rgb.z);
+    float chroma = maxc - minc;
 
-    float dx = rgb.x - avg;
-    float dy = rgb.y - avg;
-    float dz = rgb.z - avg;
-    float sat = _sqrtf(dx*dx + dy*dy + dz*dz) / (2.0f * avg);
-
-    return sat;
+    // Avoid division by zero, normalize by max to get relative saturation
+    if (maxc <= 0.0f) return 0.0f;
+    return chroma / maxc;
 }
 
 // ============================================================================
@@ -213,6 +214,11 @@ __DEVICE__ float saturation_mask(float3 rgb) {
 
 __DEVICE__ float luminance_rec709(float3 rgb) {
     return rgb.x * REC709_Y.x + rgb.y * REC709_Y.y + rgb.z * REC709_Y.z;
+}
+
+__DEVICE__ float luminance_dwg(float3 rgb) {
+    // Luminance for DaVinci Wide Gamut (Y from XYZ)
+    return rgb.x * DWG_Y.x + rgb.y * DWG_Y.y + rgb.z * DWG_Y.z;
 }
 
 // ============================================================================
@@ -312,51 +318,6 @@ __DEVICE__ float3 apply_rgb_density(float3 log_rgb, float r_dens, float g_dens, 
 }
 
 // ============================================================================
-// CONTRAST CURVE (Scene-referred)
-// ============================================================================
-
-__DEVICE__ float3 apply_contrast(float3 rgb, float contrast, float pivot, float toe_lift, float shoulder_soft) {
-    // Scene-referred contrast around a pivot point
-    // Works in linear space
-
-    if (contrast == 1.0f && toe_lift == 0.0f && shoulder_soft == 0.0f) return rgb;
-
-    float3 result;
-
-    for (int i = 0; i < 3; i++) {
-        float x = (i == 0) ? rgb.x : ((i == 1) ? rgb.y : rgb.z);
-        float y;
-
-        // Pivot-based power function
-        if (x > 0.0f) {
-            y = pivot * spowf(x / pivot, contrast);
-
-            // Toe lift (lift shadows)
-            if (toe_lift > 0.0f && x < pivot) {
-                float t = x / pivot;
-                float lift = toe_lift * (1.0f - t) * (1.0f - t);
-                y = y + lift * pivot * 0.1f;
-            }
-
-            // Shoulder softness (compress highlights)
-            if (shoulder_soft > 0.0f && x > pivot) {
-                float excess = (y - pivot) / pivot;
-                float soft = 1.0f / (1.0f + shoulder_soft * excess);
-                y = pivot + (y - pivot) * soft;
-            }
-        } else {
-            y = x;
-        }
-
-        if (i == 0) result.x = y;
-        else if (i == 1) result.y = y;
-        else result.z = y;
-    }
-
-    return result;
-}
-
-// ============================================================================
 // HUE ANGLE CALCULATION (in opponent space)
 // ============================================================================
 
@@ -424,7 +385,7 @@ __DEVICE__ float3 lum_to_hue_rotate(float3 rgb, float shadow_shift, float highli
         cyan == 0.0f && magenta == 0.0f && yellow == 0.0f &&
         red == 0.0f && green == 0.0f && blue == 0.0f) return rgb;
 
-    float lum = luminance_rec709(rgb);
+    float lum = luminance_dwg(rgb);
     float hue = hue_angle(rgb);
 
     // Shadow/highlight blend based on luminance
@@ -504,13 +465,6 @@ DEFINE_UI_PARAMS(lum_hue_red, Lum-Hue Red, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 
 DEFINE_UI_PARAMS(lum_hue_grn, Lum-Hue Green, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
 DEFINE_UI_PARAMS(lum_hue_blu, Lum-Hue Blue, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
 
-// Contrast
-DEFINE_UI_PARAMS(contrast_enable, Enable Contrast, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(contrast, Contrast, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 2.0, 0.01)
-DEFINE_UI_PARAMS(contrast_pivot, Contrast Pivot, DCTLUI_SLIDER_FLOAT, 0.18, 0.01, 1.0, 0.01)
-DEFINE_UI_PARAMS(toe_lift, Toe Lift, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 1.0, 0.01)
-DEFINE_UI_PARAMS(shoulder_soft, Shoulder Softness, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 2.0, 0.01)
-
 // Purity
 DEFINE_UI_PARAMS(purity_enable, Enable Purity, DCTLUI_CHECK_BOX, 0)
 DEFINE_UI_PARAMS(purity_r, Purity R, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 1.0, 0.01)
@@ -526,11 +480,8 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     float3 rgb = make_float3(p_R, p_G, p_B);
 
     // Input is DWG Log (DaVinci Intermediate)
-    // Convert to linear DWG
-    float3 lin = di_to_linear_f3(rgb);
-
-    // Convert to working space (Linear Rec.709)
-    float3 work = mv_33_3(MATRIX_DWG_TO_REC709, lin);
+    // Convert to linear DWG - stay in DWG for all processing to avoid gamut issues
+    float3 work = di_to_linear_f3(rgb);
 
     // ========== PRESET LOADING ==========
     float _density = density;
@@ -578,7 +529,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         work = apply_density(work, _density);
     }
 
-    // 2. RGB Density (in log space - convert, apply, convert back)
+    // 2. RGB Density (in log space)
     if (_rgb_dens_en) {
         float3 log_work = linear_to_di_f3(work);
         log_work = apply_rgb_density(log_work, _r_dens, _g_dens, _b_dens);
@@ -612,22 +563,14 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
                                   lum_hue_red, lum_hue_grn, lum_hue_blu);
     }
 
-    // 7. Contrast (in linear)
-    if (contrast_enable) {
-        work = apply_contrast(work, contrast, contrast_pivot, toe_lift, shoulder_soft);
-    }
-
-    // 8. Purity
+    // 7. Purity
     if (_purity_en) {
         float3x3 pur = purity_matrix(_purity_r / 10.0f, _purity_g / 10.0f, _purity_b / 10.0f, 1);
         work = mv_33_3(pur, work);
     }
 
-    // Convert back to DWG linear
-    lin = mv_33_3(MATRIX_REC709_TO_DWG, work);
-
-    // Convert to DWG Log (DaVinci Intermediate) for output
-    rgb = linear_to_di_f3(lin);
+    // Convert back to DWG Log (DaVinci Intermediate) for output
+    rgb = linear_to_di_f3(work);
 
     return rgb;
 }
