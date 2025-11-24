@@ -526,15 +526,14 @@ __DEVICE__ float3 lum_to_hue_rotate(float3 rgb, float shadow_shift, float highli
 
     float rotation = shadow_shift * shadow_weight + highlight_shift * highlight_weight;
 
-    // Per-zone rotations
+    // Per-zone rotations (apply equally across all luminance levels)
     float PI = 3.14159265359f;
-    float zone_factor = shadow_weight + highlight_weight * 0.5f; // Blend zone effect
-    rotation += red * gaussian_weight(hue, 0.0f, 0.5f) * zone_factor;
-    rotation += yellow * gaussian_weight(hue, PI / 3.0f, 0.5f) * zone_factor;
-    rotation += green * gaussian_weight(hue, 2.0f * PI / 3.0f, 0.5f) * zone_factor;
-    rotation += cyan * gaussian_weight(hue, PI, 0.5f) * zone_factor;
-    rotation += blue * gaussian_weight(hue, 4.0f * PI / 3.0f, 0.5f) * zone_factor;
-    rotation += magenta * gaussian_weight(hue, 5.0f * PI / 3.0f, 0.5f) * zone_factor;
+    rotation += red * gaussian_weight(hue, 0.0f, 0.5f);
+    rotation += yellow * gaussian_weight(hue, PI / 3.0f, 0.5f);
+    rotation += green * gaussian_weight(hue, 2.0f * PI / 3.0f, 0.5f);
+    rotation += cyan * gaussian_weight(hue, PI, 0.5f);
+    rotation += blue * gaussian_weight(hue, 4.0f * PI / 3.0f, 0.5f);
+    rotation += magenta * gaussian_weight(hue, 5.0f * PI / 3.0f, 0.5f);
 
     float3x3 rot = hue_rotation_matrix(rotation, rotation, rotation);
     return mv_33_3(rot, rgb);
