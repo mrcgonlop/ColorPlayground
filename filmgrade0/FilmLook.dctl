@@ -544,14 +544,14 @@ __DEVICE__ float3 lum_to_hue_rotate(float3 rgb, float shadow_shift, float highli
 // ============================================================================
 
 // Preset Selection
-DEFINE_UI_PARAMS(preset, Film Preset, DCTLUI_COMBO_BOX, 0, {p_none, p_kodak5219, p_kodak2383, p_fuji_eterna, p_portra, p_cinestill}, {None - Manual, Kodak 5219 Vision3, Kodak 2383 Print, Fuji Eterna, Portra 400, Cinestill 800T})
+DEFINE_UI_PARAMS(preset, Film Preset, DCTLUI_COMBO_BOX, 0, {p_none, p_kodak5219, p_kodak2383, p_fuji_eterna, p_portra, p_cinestill}, {None - Manual, colorful custom, Kodak 2383 Print, Fuji Eterna, Portra 400, Cinestill 800T})
 
 // Global Density
-DEFINE_UI_PARAMS(density_enable, Enable Density, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(density_enable, Enable Density, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(density, Global Density, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 4.0, 0.01)
 
 // Hue-Dependent Density (per-hue multipliers - 1.0 = neutral, >1 = more density, <1 = less)
-DEFINE_UI_PARAMS(hue_density_enable, Enable Hue Density, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(hue_density_enable, Enable Hue Density, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(hue_dens_cyan, Density Cyan, DCTLUI_SLIDER_FLOAT, 1.5, 0.0, 3.0, 0.01)
 DEFINE_UI_PARAMS(hue_dens_mag, Density Magenta, DCTLUI_SLIDER_FLOAT, 1.5, 0.0, 3.0, 0.01)
 DEFINE_UI_PARAMS(hue_dens_yel, Density Yellow, DCTLUI_SLIDER_FLOAT, 1.5, 0.0, 3.0, 0.01)
@@ -560,13 +560,13 @@ DEFINE_UI_PARAMS(hue_dens_grn, Density Green, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 3.0
 DEFINE_UI_PARAMS(hue_dens_blu, Density Blue, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 3.0, 0.01)
 
 // RGB Density
-DEFINE_UI_PARAMS(rgb_density_enable, Enable RGB Density, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(rgb_density_enable, Enable RGB Density, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(r_density, Red Density, DCTLUI_SLIDER_FLOAT, 0.0, -2.0, 2.0, 0.01)
 DEFINE_UI_PARAMS(g_density, Green Density, DCTLUI_SLIDER_FLOAT, 0.0, -2.0, 2.0, 0.01)
 DEFINE_UI_PARAMS(b_density, Blue Density, DCTLUI_SLIDER_FLOAT, 0.0, -2.0, 2.0, 0.01)
 
 // Channel Crosstalk
-DEFINE_UI_PARAMS(crosstalk_enable, Enable Crosstalk, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(crosstalk_enable, Enable Crosstalk, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(ct_rg, R to G, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
 DEFINE_UI_PARAMS(ct_rb, R to B, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
 DEFINE_UI_PARAMS(ct_gr, G to R, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
@@ -576,7 +576,7 @@ DEFINE_UI_PARAMS(ct_bg, B to G, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
 DEFINE_UI_PARAMS(ct_mix, Crosstalk Mix, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.0, 0.01)
 
 // Interlayer Effects (opposite of crosstalk - channel inhibition for color separation)
-DEFINE_UI_PARAMS(interlayer_enable, Enable Interlayer, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(interlayer_enable, Enable Interlayer, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(il_rg, R inhibits G, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
 DEFINE_UI_PARAMS(il_gr, G inhibits R, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
 DEFINE_UI_PARAMS(il_gb, G inhibits B, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
@@ -585,13 +585,13 @@ DEFINE_UI_PARAMS(il_br, B inhibits R, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
 DEFINE_UI_PARAMS(il_rb, R inhibits B, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
 
 // Overall Hue Rotation
-DEFINE_UI_PARAMS(hue_enable, Enable Hue Rotation, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(hue_enable, Enable Hue Rotation, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(hue_r, Hue Rotate R, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
 DEFINE_UI_PARAMS(hue_g, Hue Rotate G, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
 DEFINE_UI_PARAMS(hue_b, Hue Rotate B, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
 
 // Saturation-to-Hue
-DEFINE_UI_PARAMS(sat_hue_enable, Enable Sat-Hue, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(sat_hue_enable, Enable Sat-Hue, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(sat_hue_str, Sat-Hue Strength, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.01)
 DEFINE_UI_PARAMS(sat_hue_peak, Sat-Hue Peak, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 1.0, 0.01)
 DEFINE_UI_PARAMS(sat_hue_shape, Sat-Hue Shape, DCTLUI_SLIDER_FLOAT, 0.3, 0.05, 1.0, 0.01)
@@ -603,7 +603,7 @@ DEFINE_UI_PARAMS(sat_hue_grn, Sat-Hue Green, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5
 DEFINE_UI_PARAMS(sat_hue_blu, Sat-Hue Blue, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
 
 // Luminance-to-Hue
-DEFINE_UI_PARAMS(lum_hue_enable, Enable Lum-Hue, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(lum_hue_enable, Enable Lum-Hue, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(lum_hue_shadow, Shadow Hue Shift, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
 DEFINE_UI_PARAMS(lum_hue_high, Highlight Hue Shift, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 0.5, 0.01)
 DEFINE_UI_PARAMS(lum_hue_mid, Lum-Hue Midpoint, DCTLUI_SLIDER_FLOAT, 0.18, 0.001, 1.0, 0.01)
@@ -616,25 +616,25 @@ DEFINE_UI_PARAMS(lum_hue_grn, Lum-Hue Green, DCTLUI_SLIDER_FLOAT, 0.0, -1.5, 1.5
 DEFINE_UI_PARAMS(lum_hue_blu, Lum-Hue Blue, DCTLUI_SLIDER_FLOAT, 0.0, -1.5, 1.5, 0.01)
 
 // Purity
-DEFINE_UI_PARAMS(purity_enable, Enable Purity, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(purity_enable, Enable Purity, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(purity_r, Purity R, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 1.0, 0.01)
 DEFINE_UI_PARAMS(purity_g, Purity G, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 1.0, 0.01)
 DEFINE_UI_PARAMS(purity_b, Purity B, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 1.0, 0.01)
 DEFINE_UI_PARAMS(purity_mix, Purity Mix, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.0, 0.01)
 
 // Highlight Rolloff
-DEFINE_UI_PARAMS(rolloff_enable, Enable Highlight Rolloff, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(rolloff_strength, Rolloff Strength, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 4.0, 0.01)
+DEFINE_UI_PARAMS(rolloff_enable, Enable Highlight Rolloff, DCTLUI_CHECK_BOX, 1)
+DEFINE_UI_PARAMS(rolloff_strength, Rolloff Strength, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 4.0, 0.01)
 DEFINE_UI_PARAMS(rolloff_threshold, Rolloff Threshold, DCTLUI_SLIDER_FLOAT, 0.5, 0.001, 4.0, 0.01)
 
 // Saturation Rolloff (highlight desaturation)
-DEFINE_UI_PARAMS(sat_rolloff_enable, Enable Sat Rolloff, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(sat_rolloff_enable, Enable Sat Rolloff, DCTLUI_CHECK_BOX, 1)
 DEFINE_UI_PARAMS(sat_rolloff_strength, Sat Rolloff Strength, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
 DEFINE_UI_PARAMS(sat_rolloff_threshold, Sat Rolloff Threshold, DCTLUI_SLIDER_FLOAT, 0.5, 0.001, 3.0, 0.01)
 
 // Black Fog (lifted blacks)
-DEFINE_UI_PARAMS(fog_enable, Enable Black Fog, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(fog_level, Fog Level, DCTLUI_SLIDER_FLOAT, 0.02, 0.0, 0.1, 0.001)
+DEFINE_UI_PARAMS(fog_enable, Enable Black Fog, DCTLUI_CHECK_BOX, 1)
+DEFINE_UI_PARAMS(fog_level, Fog Level, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.1, 0.001)
 DEFINE_UI_PARAMS(fog_r, Fog Red, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
 DEFINE_UI_PARAMS(fog_g, Fog Green, DCTLUI_SLIDER_FLOAT, 0.95, 0.5, 1.5, 0.01)
 DEFINE_UI_PARAMS(fog_b, Fog Blue, DCTLUI_SLIDER_FLOAT, 0.9, 0.5, 1.5, 0.01)
@@ -657,6 +657,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     float _hd_red = hue_dens_red, _hd_grn = hue_dens_grn, _hd_blu = hue_dens_blu;
     float _r_dens = r_density, _g_dens = g_density, _b_dens = b_density;
     float _ct_rg = ct_rg, _ct_rb = ct_rb, _ct_gr = ct_gr, _ct_gb = ct_gb, _ct_br = ct_br, _ct_bg = ct_bg;
+    float _il_rg = il_rg, _il_gr = il_gr, _il_gb = il_gb, _il_bg = il_bg, _il_br = il_br, _il_rb = il_rb;
     float _hue_r = hue_r, _hue_g = hue_g, _hue_b = hue_b;
     float _purity_r = purity_r, _purity_g = purity_g, _purity_b = purity_b;
     float _rolloff_str = rolloff_strength, _rolloff_thresh = rolloff_threshold;
@@ -667,17 +668,11 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     int _rolloff_en = rolloff_enable, _sat_rolloff_en = sat_rolloff_enable, _fog_en = fog_enable;
 
     if (preset == p_kodak5219) {
-        // Kodak Vision3 5219 500T - Tungsten cinema negative
-        // Known for: rich warm shadows, subtle cyan highlights, natural skin tones
-        // Medium saturation, smooth highlight rolloff, slight warm fog
-        _density = 0.6f; _density_en = 1;
-        _hd_cyan = 1.6f; _hd_mag = 1.4f; _hd_yel = 1.5f; _hd_red = 1.0f; _hd_grn = 0.9f; _hd_blu = 1.1f; _hue_dens_en = 1;
-        _hue_r = 0.04f; _hue_g = -0.02f; _hue_b = 0.08f; _hue_en = 1;
-        _ct_rg = 0.015f; _ct_gb = 0.02f; _crosstalk_en = 1;
-        _purity_r = 0.15f; _purity_g = 0.08f; _purity_b = 0.12f; _purity_en = 1;
-        _rolloff_str = 0.8f; _rolloff_thresh = 0.6f; _rolloff_en = 1;
-        _sat_rolloff_str = 0.4f; _sat_rolloff_thresh = 0.5f; _sat_rolloff_en = 1;
-        _fog_level = 0.015f; _fog_r = 1.05f; _fog_g = 1.0f; _fog_b = 0.92f; _fog_en = 1;
+
+        _ct_rg =-0.2f; _ct_rb =-0.166f;_ct_gr =-0.077f; _ct_gb =-0.174f;_ct_br =-0.196f; _ct_bg =-0.125f; _crosstalk_en = 1;
+        _il_rg=0.0f; _il_gr=0.04f; _il_gb=0.0f; _il_bg=0.0f; _il_br=0.056f; _il_rb=0.023f;
+        _purity_r = 0.068f; _purity_g = -0.023f; _purity_b = 0.215f; _purity_en = 1;
+
     } else if (preset == p_kodak2383) {
         // Kodak 2383 Print Stock - Cinema print film
         // Known for: punchy contrast, saturated reds, teal shadows, strong rolloff
@@ -755,7 +750,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
 
     // 3b. Interlayer Effects (opposite of crosstalk - channel inhibition)
     if (interlayer_enable) {
-        work = apply_interlayer(work, il_rg, il_gr, il_gb, il_bg, il_br, il_rb);
+        work = apply_interlayer(work, _il_rg, _il_gr, _il_gb, _il_bg, _il_br, _il_rb);
     }
 
     // 4. Overall Hue Rotation
