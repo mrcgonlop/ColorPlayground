@@ -1,0 +1,491 @@
+/*----------------------------------------------------------------------
+    FilmPrint - Print Film Emulation
+    v0.1.0
+
+    Part 2 of 2-node film emulation pipeline (use with FilmNegative.dctl)
+
+    Pipeline: Camera → [FilmNegative] → [FilmPrint] → [OpenDRT] → Display
+
+    This node simulates what happens when the negative is printed:
+    1. Printer lights - color timing exposure adjustments
+    2. Print density curves - higher gamma than negative
+    3. Print dye crosstalk - different from negative
+    4. Projection characteristics - final color personality
+
+    Input/Output: DaVinci Wide Gamut / DaVinci Intermediate (Log)
+
+    WHY A PRINT NODE?
+    -----------------
+    The print stage is where the "film look" really comes together.
+    The negative is intentionally low-contrast and low-saturation.
+    The print process:
+    - Adds contrast (gamma multiplication: neg 0.6 × print 2.5 ≈ 1.5 final)
+    - Introduces its own color character (different dyes than negative)
+    - Creates the final highlight rolloff and shadow density
+    - Adds projection warmth and base fog
+
+    The interaction between neg and print curves creates characteristic
+    S-curves and color behavior that can't be replicated with a single LUT.
+----------------------------------------------------------------------*/
+
+// ============================================================================
+// MATH HELPERS
+// ============================================================================
+
+typedef struct {
+    float3 x, y, z;
+} float3x3;
+
+__DEVICE__ float3x3 make_float3x3(float3 a, float3 b, float3 c) {
+    float3x3 d;
+    d.x = a; d.y = b; d.z = c;
+    return d;
+}
+
+__DEVICE__ float3 mv_33_3(float3x3 m, float3 v) {
+    return make_float3(
+        m.x.x * v.x + m.x.y * v.y + m.x.z * v.z,
+        m.y.x * v.x + m.y.y * v.y + m.y.z * v.z,
+        m.z.x * v.x + m.z.y * v.y + m.z.z * v.z
+    );
+}
+
+__DEVICE__ float max3(float x, float y, float z) {
+    return _fmaxf(x, _fmaxf(y, z));
+}
+
+__DEVICE__ float min3(float x, float y, float z) {
+    return _fminf(x, _fminf(y, z));
+}
+
+__DEVICE__ float clampf(float x, float lo, float hi) {
+    return _fmaxf(lo, _fminf(x, hi));
+}
+
+__DEVICE__ float lerpf(float a, float b, float t) {
+    return a + t * (b - a);
+}
+
+__DEVICE__ float3 lerpf3(float3 a, float3 b, float t) {
+    return make_float3(lerpf(a.x, b.x, t), lerpf(a.y, b.y, t), lerpf(a.z, b.z, t));
+}
+
+// ============================================================================
+// LOG ENCODING - DaVinci Intermediate
+// ============================================================================
+
+__DEVICE__ float di_to_linear(float x) {
+    const float A = 0.0075f;
+    const float B = 7.0f;
+    const float C = 0.07329248f;
+    const float M = 10.44426855f;
+    const float LOG_CUT = 0.02740668f;
+    return x <= LOG_CUT ? x / M : _exp2f(x / C - B) - A;
+}
+
+__DEVICE__ float linear_to_di(float x) {
+    const float A = 0.0075f;
+    const float B = 7.0f;
+    const float C = 0.07329248f;
+    const float M = 10.44426855f;
+    const float LIN_CUT = 0.00262409f;
+    return x <= LIN_CUT ? x * M : (_log2f(x + A) + B) * C;
+}
+
+__DEVICE__ float3 di_to_linear_f3(float3 v) {
+    return make_float3(di_to_linear(v.x), di_to_linear(v.y), di_to_linear(v.z));
+}
+
+__DEVICE__ float3 linear_to_di_f3(float3 v) {
+    return make_float3(linear_to_di(v.x), linear_to_di(v.y), linear_to_di(v.z));
+}
+
+// ============================================================================
+// SATURATION MASK
+// ============================================================================
+
+__DEVICE__ float saturation_mask(float3 rgb) {
+    float maxc = max3(rgb.x, rgb.y, rgb.z);
+    float minc = min3(rgb.x, rgb.y, rgb.z);
+    float chroma = maxc - minc;
+    if (maxc <= 0.0f) return 0.0f;
+    return chroma / maxc;
+}
+
+// ============================================================================
+// LUMINANCE (DWG weights)
+// ============================================================================
+
+#define DWG_Y make_float3(0.274118483067f, 0.873631775379f, -0.147750422359f)
+
+__DEVICE__ float luminance_dwg(float3 rgb) {
+    return rgb.x * DWG_Y.x + rgb.y * DWG_Y.y + rgb.z * DWG_Y.z;
+}
+
+// ============================================================================
+// PRINTER LIGHTS
+// ============================================================================
+// WHY: In lab printing, the colorist adjusts "printer lights" - RGB exposure
+// values that control how much light of each color exposes the print.
+//
+// This is the traditional color timing control:
+// - Higher values = more exposure = darker print in that channel
+// - Used for overall color balance and scene-to-scene matching
+//
+// We model this as simple per-channel multipliers in linear space.
+// A "25-25-25" printer light setting is neutral. Values above/below shift
+// the balance.
+//
+// In real printing, each printer light unit is roughly 0.025 log exposure.
+// We simplify to direct multipliers for easier control.
+
+__DEVICE__ float3 apply_printer_lights(float3 rgb, float r, float g, float b) {
+    // Printer lights as multipliers (1.0 = neutral)
+    // <1.0 = less exposure = brighter print
+    // >1.0 = more exposure = darker print
+    // (Note: we invert the sense here for intuitive control)
+    return make_float3(rgb.x * r, rgb.y * g, rgb.z * b);
+}
+
+// ============================================================================
+// PRINT DENSITY CURVES
+// ============================================================================
+// WHY: Print film has MUCH higher gamma than negative (2.5-3.0 vs 0.6).
+// This is what creates the final contrast. The negative's low gamma
+// multiplied by print's high gamma gives the final look.
+//
+// Print curves also have:
+// - Harder toe (crushed blacks, the "film black" look)
+// - Strong shoulder (highlight rolloff to projection white)
+// - Often slightly different gamma per channel (color character)
+//
+// The toe is particularly important - it's where the "filmic" shadow
+// density comes from. Film doesn't have true black; it has D-min
+// (minimum density) which creates that lifted, rich shadow feel.
+
+__DEVICE__ float print_curve(float x, float gamma, float toe_strength, float shoulder_strength, float d_min) {
+    // x: input from negative
+    // gamma: print gamma (typically 2.4-3.0)
+    // toe_strength: shadow compression (creates film black)
+    // shoulder_strength: highlight compression
+    // d_min: minimum density (floor lift)
+
+    if (x <= 0.0f) return d_min;
+
+    // Apply power function for gamma
+    float y = _powf(x, gamma);
+
+    // Toe: stronger than negative, creates "film black"
+    if (toe_strength > 0.0f) {
+        float toe = toe_strength * 0.05f;
+        // Blend toward d_min in deep shadows
+        float toe_blend = 1.0f / (1.0f + _powf(x / toe, 2.0f));
+        y = lerpf(y, d_min, toe_blend * toe_strength);
+    }
+
+    // Shoulder: compress highlights smoothly
+    if (shoulder_strength > 0.0f) {
+        float compress = shoulder_strength * 0.3f;
+        y = y / (1.0f + compress * y);
+    }
+
+    // Ensure we never go below d_min
+    y = _fmaxf(y, d_min);
+
+    return y;
+}
+
+__DEVICE__ float3 apply_print_curves(float3 rgb,
+                                       float r_gamma, float g_gamma, float b_gamma,
+                                       float toe, float shoulder, float d_min) {
+    return make_float3(
+        print_curve(rgb.x, r_gamma, toe, shoulder, d_min),
+        print_curve(rgb.y, g_gamma, toe, shoulder, d_min),
+        print_curve(rgb.z, b_gamma, toe, shoulder, d_min)
+    );
+}
+
+// ============================================================================
+// PRINT CROSSTALK
+// ============================================================================
+// WHY: Print film also has dye layers, but they behave differently than
+// negative. The crosstalk pattern is typically less than negative but
+// still contributes to the color character.
+//
+// Kodak 2383 print stock, for example, has characteristic crosstalk that
+// creates its famous "teal and orange" complementary color rendering.
+
+__DEVICE__ float3x3 crosstalk_matrix(float rg, float rb, float gr, float gb, float br, float bg) {
+    float3 r_row = make_float3(1.0f - rg - rb, rg, rb);
+    float3 g_row = make_float3(gr, 1.0f - gr - gb, gb);
+    float3 b_row = make_float3(br, bg, 1.0f - br - bg);
+    return make_float3x3(r_row, g_row, b_row);
+}
+
+// ============================================================================
+// SATURATION ROLLOFF IN HIGHLIGHTS
+// ============================================================================
+// WHY: Both film and projection desaturate in highlights. This happens
+// because:
+// 1. Print dye layers can only absorb so much light
+// 2. Projector lamp intensity overwhelms dye absorption
+// 3. Creates natural path-to-white behavior
+//
+// This is a key part of the "filmic" highlight handling that differs
+// from digital's tendency to hold saturation into clipping.
+
+__DEVICE__ float3 apply_sat_rolloff(float3 rgb, float strength, float threshold) {
+    if (strength <= 0.0f) return rgb;
+
+    float lum = luminance_dwg(rgb);
+    if (lum <= threshold) return rgb;
+
+    float blend = (lum - threshold) / (lum - threshold + 0.5f);
+    blend = blend * strength;
+    blend = _fminf(blend, 1.0f);
+
+    float3 gray = make_float3(lum, lum, lum);
+    return lerpf3(rgb, gray, blend);
+}
+
+// ============================================================================
+// PROJECTION WARMTH / COLOR CAST
+// ============================================================================
+// WHY: Real projection adds color character from:
+// 1. Lamp color temperature (traditionally warm, around 3200K)
+// 2. Lens coatings (often slight yellow-green tint)
+// 3. Screen characteristics
+//
+// This creates an overall warmth that's part of the "cinema" look.
+// We model this as a subtle color matrix applied last.
+
+__DEVICE__ float3 apply_projection_warmth(float3 rgb, float warmth, float tint) {
+    // warmth: positive = warmer, negative = cooler
+    // tint: positive = green, negative = magenta
+
+    float3 result;
+
+    // Warmth shifts blue toward red
+    result.x = rgb.x * (1.0f + warmth * 0.05f);
+    result.y = rgb.y * (1.0f + tint * 0.02f);
+    result.z = rgb.z * (1.0f - warmth * 0.05f);
+
+    return result;
+}
+
+// ============================================================================
+// BLACK FOG (projection D-min)
+// ============================================================================
+// WHY: Even the densest part of print film still transmits some light.
+// This creates a "floor" to the blacks that's part of the film aesthetic.
+// The fog can have a color cast based on the print stock and projection.
+//
+// This is different from "lifted blacks" in grading - it's a physical
+// property of the print-projection system.
+
+__DEVICE__ float3 apply_black_fog(float3 rgb, float fog_level, float3 fog_color) {
+    return rgb + fog_color * fog_level;
+}
+
+// ============================================================================
+// HUE ROTATION (white-balanced)
+// ============================================================================
+// WHY: Print film can impart subtle hue shifts that create color character.
+// The famous "teal shadows, orange highlights" look of 2383 comes partly
+// from its hue response.
+
+__DEVICE__ float3x3 hue_rotation_matrix(float rot_r, float rot_g, float rot_b) {
+    float3 redcoeff = make_float3(1.0f,
+        rot_g > 0.0f ? rot_g : 0.0f,
+        rot_b < 0.0f ? -rot_b : 0.0f);
+    float3 greencoeff = make_float3(
+        rot_r > 0.0f ? rot_r : 0.0f,
+        1.0f,
+        rot_b > 0.0f ? rot_b : 0.0f);
+    float3 bluecoeff = make_float3(
+        rot_r < 0.0f ? -rot_r : 0.0f,
+        rot_g < 0.0f ? -rot_g : 0.0f,
+        1.0f);
+
+    float3 white;
+    white.x = 1.0f + redcoeff.y + redcoeff.z;
+    white.y = greencoeff.x + 1.0f + greencoeff.z;
+    white.z = bluecoeff.x + bluecoeff.y + 1.0f;
+
+    redcoeff = redcoeff / white.x;
+    greencoeff = greencoeff / white.y;
+    bluecoeff = bluecoeff / white.z;
+
+    return make_float3x3(redcoeff, greencoeff, bluecoeff);
+}
+
+// ============================================================================
+// UI PARAMETERS
+// ============================================================================
+
+// Preset Selection
+DEFINE_UI_PARAMS(preset, Print Stock, DCTLUI_COMBO_BOX, 0, {p_none, p_2383, p_2393, p_lpp}, {Manual, Kodak 2383, Kodak 2393, Fuji LPP})
+
+// Printer Lights (color timing)
+DEFINE_UI_PARAMS(printer_enable, Enable Printer Lights, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(printer_r, Printer Red, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(printer_g, Printer Green, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(printer_b, Printer Blue, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
+
+// Print Curves
+DEFINE_UI_PARAMS(curves_enable, Enable Curves, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(gamma_r, Gamma Red, DCTLUI_SLIDER_FLOAT, 2.5, 1.5, 3.5, 0.01)
+DEFINE_UI_PARAMS(gamma_g, Gamma Green, DCTLUI_SLIDER_FLOAT, 2.5, 1.5, 3.5, 0.01)
+DEFINE_UI_PARAMS(gamma_b, Gamma Blue, DCTLUI_SLIDER_FLOAT, 2.5, 1.5, 3.5, 0.01)
+DEFINE_UI_PARAMS(toe, Toe Strength, DCTLUI_SLIDER_FLOAT, 0.6, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(shoulder, Shoulder Strength, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(d_min, D-Min Black Floor, DCTLUI_SLIDER_FLOAT, 0.01, 0.0, 0.05, 0.001)
+
+// Crosstalk
+DEFINE_UI_PARAMS(crosstalk_enable, Enable Crosstalk, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(ct_rg, R to G, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_rb, R to B, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_gr, G to R, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_gb, G to B, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_br, B to R, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_bg, B to G, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+
+// Hue Rotation
+DEFINE_UI_PARAMS(hue_enable, Enable Hue Rotation, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(hue_r, Hue Rotate R, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
+DEFINE_UI_PARAMS(hue_g, Hue Rotate G, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
+DEFINE_UI_PARAMS(hue_b, Hue Rotate B, DCTLUI_SLIDER_FLOAT, 0.0, -0.3, 0.3, 0.01)
+
+// Saturation Rolloff
+DEFINE_UI_PARAMS(sat_rolloff_enable, Enable Sat Rolloff, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(sat_rolloff_str, Sat Rolloff Strength, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(sat_rolloff_thresh, Sat Rolloff Threshold, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+
+// Projection
+DEFINE_UI_PARAMS(projection_enable, Enable Projection, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(proj_warmth, Projection Warmth, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(proj_tint, Projection Tint, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.01)
+
+// Black Fog
+DEFINE_UI_PARAMS(fog_enable, Enable Black Fog, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(fog_level, Fog Level, DCTLUI_SLIDER_FLOAT, 0.01, 0.0, 0.05, 0.001)
+DEFINE_UI_PARAMS(fog_r, Fog Red, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(fog_g, Fog Green, DCTLUI_SLIDER_FLOAT, 0.95, 0.5, 1.5, 0.01)
+DEFINE_UI_PARAMS(fog_b, Fog Blue, DCTLUI_SLIDER_FLOAT, 0.9, 0.5, 1.5, 0.01)
+
+// ============================================================================
+// MAIN TRANSFORM
+// ============================================================================
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, float p_B) {
+
+    float3 rgb = make_float3(p_R, p_G, p_B);
+    float3 work = di_to_linear_f3(rgb);
+
+    // ========== LOAD PRESETS ==========
+    // Each preset models a specific print stock
+
+    float _printer_r = printer_r, _printer_g = printer_g, _printer_b = printer_b;
+    float _gamma_r = gamma_r, _gamma_g = gamma_g, _gamma_b = gamma_b;
+    float _toe = toe, _shoulder = shoulder, _d_min = d_min;
+    float _ct_rg = ct_rg, _ct_rb = ct_rb, _ct_gr = ct_gr;
+    float _ct_gb = ct_gb, _ct_br = ct_br, _ct_bg = ct_bg;
+    float _hue_r = hue_r, _hue_g = hue_g, _hue_b = hue_b;
+    float _sat_str = sat_rolloff_str, _sat_thresh = sat_rolloff_thresh;
+    float _proj_warmth = proj_warmth, _proj_tint = proj_tint;
+    float _fog_level = fog_level, _fog_r = fog_r, _fog_g = fog_g, _fog_b = fog_b;
+
+    int _printer_en = printer_enable, _curves_en = curves_enable;
+    int _ct_en = crosstalk_enable, _hue_en = hue_enable;
+    int _sat_en = sat_rolloff_enable, _proj_en = projection_enable;
+    int _fog_en = fog_enable;
+
+    if (preset == p_2383) {
+        // Kodak Vision 2383 - The industry standard cinema print stock
+        // Characteristics: Punchy, saturated reds, teal shadows, strong contrast
+        // This is THE "film look" for modern cinema
+        _gamma_r = 2.55f; _gamma_g = 2.50f; _gamma_b = 2.45f;
+        _toe = 0.7f; _shoulder = 0.8f; _d_min = 0.008f; _curves_en = 1;
+        _ct_gr = 0.01f; _ct_gb = 0.02f; _ct_en = 1;
+        _hue_r = 0.05f; _hue_g = -0.06f; _hue_b = 0.12f; _hue_en = 1;
+        _sat_str = 0.6f; _sat_thresh = 0.4f; _sat_en = 1;
+        _proj_warmth = 0.15f; _proj_tint = -0.05f; _proj_en = 1;
+        _fog_level = 0.008f; _fog_r = 0.95f; _fog_g = 0.98f; _fog_b = 1.1f; _fog_en = 1;
+    }
+    else if (preset == p_2393) {
+        // Kodak 2393 - Release print stock (slightly different than 2383)
+        // Characteristics: Similar to 2383 but optimized for release prints
+        // Slightly less contrast, better shadow detail
+        _gamma_r = 2.45f; _gamma_g = 2.42f; _gamma_b = 2.38f;
+        _toe = 0.6f; _shoulder = 0.75f; _d_min = 0.01f; _curves_en = 1;
+        _ct_gr = 0.008f; _ct_gb = 0.018f; _ct_en = 1;
+        _hue_r = 0.04f; _hue_g = -0.05f; _hue_b = 0.1f; _hue_en = 1;
+        _sat_str = 0.55f; _sat_thresh = 0.45f; _sat_en = 1;
+        _proj_warmth = 0.12f; _proj_tint = -0.03f; _proj_en = 1;
+        _fog_level = 0.01f; _fog_r = 0.97f; _fog_g = 0.99f; _fog_b = 1.08f; _fog_en = 1;
+    }
+    else if (preset == p_lpp) {
+        // Fuji LPP - Fuji's print stock (before discontinuation)
+        // Characteristics: Cooler than Kodak, cleaner highlights, subtle greens
+        _gamma_r = 2.40f; _gamma_g = 2.45f; _gamma_b = 2.50f;
+        _toe = 0.55f; _shoulder = 0.7f; _d_min = 0.01f; _curves_en = 1;
+        _ct_gb = 0.015f; _ct_bg = 0.01f; _ct_en = 1;
+        _hue_r = -0.02f; _hue_g = -0.04f; _hue_b = 0.06f; _hue_en = 1;
+        _sat_str = 0.5f; _sat_thresh = 0.5f; _sat_en = 1;
+        _proj_warmth = 0.05f; _proj_tint = 0.02f; _proj_en = 1;
+        _fog_level = 0.01f; _fog_r = 0.92f; _fog_g = 0.97f; _fog_b = 1.05f; _fog_en = 1;
+    }
+
+    // ========== PROCESSING CHAIN ==========
+    // Order follows light path through print and projection.
+
+    // 1. PRINTER LIGHTS (color timing - first because it's exposure)
+    // This is how the colorist balanced the shot in the lab
+    if (_printer_en) {
+        work = apply_printer_lights(work, _printer_r, _printer_g, _printer_b);
+    }
+
+    // 2. PRINT CURVES (the gamma multiplication with negative)
+    // This creates the final contrast and density
+    if (_curves_en) {
+        work = apply_print_curves(work, _gamma_r, _gamma_g, _gamma_b, _toe, _shoulder, _d_min);
+    }
+
+    // 3. CROSSTALK (print dye interaction)
+    // Different from negative - print dyes have their own character
+    if (_ct_en) {
+        float3x3 ct = crosstalk_matrix(_ct_rg, _ct_rb, _ct_gr, _ct_gb, _ct_br, _ct_bg);
+        work = mv_33_3(ct, work);
+    }
+
+    // 4. HUE ROTATION (print color character)
+    // Creates the signature color shifts of each print stock
+    if (_hue_en) {
+        float3x3 hue_mat = hue_rotation_matrix(_hue_r, _hue_g, _hue_b);
+        work = mv_33_3(hue_mat, work);
+    }
+
+    // 5. SATURATION ROLLOFF (highlight desaturation)
+    // Path-to-white behavior from dye saturation limits
+    if (_sat_en) {
+        work = apply_sat_rolloff(work, _sat_str, _sat_thresh);
+    }
+
+    // 6. PROJECTION WARMTH (lamp and screen characteristics)
+    // The final color cast from the projection system
+    if (_proj_en) {
+        work = apply_projection_warmth(work, _proj_warmth, _proj_tint);
+    }
+
+    // 7. BLACK FOG (projection D-min)
+    // The lifted black floor from minimum print density
+    if (_fog_en) {
+        float3 fog_col = make_float3(_fog_r, _fog_g, _fog_b);
+        work = apply_black_fog(work, _fog_level, fog_col);
+    }
+
+    // Convert back to log for output
+    rgb = linear_to_di_f3(work);
+
+    return rgb;
+}

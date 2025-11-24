@@ -1,0 +1,530 @@
+/*----------------------------------------------------------------------
+    FilmNegative - Negative Film Emulation
+    v0.1.0
+
+    Part 1 of 2-node film emulation pipeline (use with FilmPrint.dctl)
+
+    Pipeline: Camera → [FilmNegative] → [FilmPrint] → [OpenDRT] → Display
+
+    This node simulates what happens when light exposes camera negative film:
+    1. Spectral sensitivity - how the film "sees" colors differently than camera
+    2. Density response - the characteristic curves (toe, shoulder, gamma)
+    3. Dye formation - CMY dyes with crosstalk between layers
+    4. Inter-image effects - how one layer affects adjacent layers
+
+    Input/Output: DaVinci Wide Gamut / DaVinci Intermediate (Log)
+
+    WHY A NEGATIVE NODE?
+    --------------------
+    Real film negative is an intermediate step - it captures light as dye
+    densities that will later be printed. The negative has:
+    - Inverted tones (more light = more density = darker on film)
+    - Orange mask (for color correction in printing)
+    - Specific spectral sensitivities per layer
+
+    We simulate the COLOR EFFECTS of this process without actual inversion,
+    because our goal is a usable scene-referred image, not a literal negative.
+----------------------------------------------------------------------*/
+
+// ============================================================================
+// MATH HELPERS
+// ============================================================================
+
+typedef struct {
+    float3 x, y, z;
+} float3x3;
+
+__DEVICE__ float3x3 make_float3x3(float3 a, float3 b, float3 c) {
+    float3x3 d;
+    d.x = a; d.y = b; d.z = c;
+    return d;
+}
+
+__DEVICE__ float3 mv_33_3(float3x3 m, float3 v) {
+    return make_float3(
+        m.x.x * v.x + m.x.y * v.y + m.x.z * v.z,
+        m.y.x * v.x + m.y.y * v.y + m.y.z * v.z,
+        m.z.x * v.x + m.z.y * v.y + m.z.z * v.z
+    );
+}
+
+__DEVICE__ float max3(float x, float y, float z) {
+    return _fmaxf(x, _fmaxf(y, z));
+}
+
+__DEVICE__ float min3(float x, float y, float z) {
+    return _fminf(x, _fminf(y, z));
+}
+
+__DEVICE__ float clampf(float x, float lo, float hi) {
+    return _fmaxf(lo, _fminf(x, hi));
+}
+
+__DEVICE__ float lerpf(float a, float b, float t) {
+    return a + t * (b - a);
+}
+
+__DEVICE__ float3 lerpf3(float3 a, float3 b, float t) {
+    return make_float3(lerpf(a.x, b.x, t), lerpf(a.y, b.y, t), lerpf(a.z, b.z, t));
+}
+
+// ============================================================================
+// LOG ENCODING - DaVinci Intermediate
+// ============================================================================
+// WHY: We work in DI log space because that's what Resolve uses. We convert
+// to linear for operations that need it (density, crosstalk) and back to log
+// for operations that work better there (curves).
+
+__DEVICE__ float di_to_linear(float x) {
+    const float A = 0.0075f;
+    const float B = 7.0f;
+    const float C = 0.07329248f;
+    const float M = 10.44426855f;
+    const float LOG_CUT = 0.02740668f;
+    return x <= LOG_CUT ? x / M : _exp2f(x / C - B) - A;
+}
+
+__DEVICE__ float linear_to_di(float x) {
+    const float A = 0.0075f;
+    const float B = 7.0f;
+    const float C = 0.07329248f;
+    const float M = 10.44426855f;
+    const float LIN_CUT = 0.00262409f;
+    return x <= LIN_CUT ? x * M : (_log2f(x + A) + B) * C;
+}
+
+__DEVICE__ float3 di_to_linear_f3(float3 v) {
+    return make_float3(di_to_linear(v.x), di_to_linear(v.y), di_to_linear(v.z));
+}
+
+__DEVICE__ float3 linear_to_di_f3(float3 v) {
+    return make_float3(linear_to_di(v.x), linear_to_di(v.y), linear_to_di(v.z));
+}
+
+// ============================================================================
+// SATURATION MASK
+// ============================================================================
+// WHY: Many film effects are saturation-dependent. Neutral colors pass through
+// unchanged, while saturated colors get density/crosstalk effects.
+
+__DEVICE__ float saturation_mask(float3 rgb) {
+    float maxc = max3(rgb.x, rgb.y, rgb.z);
+    float minc = min3(rgb.x, rgb.y, rgb.z);
+    float chroma = maxc - minc;
+    if (maxc <= 0.0f) return 0.0f;
+    return chroma / maxc;
+}
+
+// ============================================================================
+// LUMINANCE (DWG-appropriate weights)
+// ============================================================================
+
+#define DWG_Y make_float3(0.274118483067f, 0.873631775379f, -0.147750422359f)
+
+__DEVICE__ float luminance_dwg(float3 rgb) {
+    return rgb.x * DWG_Y.x + rgb.y * DWG_Y.y + rgb.z * DWG_Y.z;
+}
+
+// ============================================================================
+// SPECTRAL SENSITIVITY MATRIX
+// ============================================================================
+// WHY: Film doesn't see colors like a digital camera. Each emulsion layer
+// (sensitive to R, G, or B) has a specific spectral response. This causes
+// colors to shift in characteristic ways.
+//
+// Vision3 negative films, for example:
+// - Red layer has some green sensitivity (makes oranges richer)
+// - Blue layer is very pure (clean sky separation)
+// - Green layer has slight blue leak (affects skin tones)
+//
+// We model this as a 3x3 matrix that remaps camera RGB to "film RGB".
+// The matrix is close to identity but with subtle cross-channel terms.
+
+__DEVICE__ float3x3 spectral_sensitivity_matrix(float rg, float rb, float gr, float gb, float br, float bg) {
+    // Each row represents how that film layer "sees" the three channels
+    // rg = how much green the red-sensitive layer picks up, etc.
+
+    // Normalize rows to preserve overall brightness
+    float r_sum = 1.0f + rg + rb;
+    float g_sum = gr + 1.0f + gb;
+    float b_sum = br + bg + 1.0f;
+
+    float3 r_row = make_float3(1.0f / r_sum, rg / r_sum, rb / r_sum);
+    float3 g_row = make_float3(gr / g_sum, 1.0f / g_sum, gb / g_sum);
+    float3 b_row = make_float3(br / b_sum, bg / b_sum, 1.0f / b_sum);
+
+    return make_float3x3(r_row, g_row, b_row);
+}
+
+// ============================================================================
+// NEGATIVE DENSITY CURVES (per-channel)
+// ============================================================================
+// WHY: This is the heart of the negative film look. Each color layer has a
+// characteristic curve that relates exposure to density.
+//
+// Key curve features:
+// - TOE: Shadows compress gradually (underexposure latitude)
+// - GAMMA: Mid-tone slope (typically 0.5-0.7 for negative)
+// - SHOULDER: Highlights compress (overexposure latitude)
+//
+// Negative film has LOWER gamma than print (0.6 vs 2.5+) because the print
+// process will multiply the gammas together.
+//
+// We use a simplified model: power function with toe and shoulder shaping.
+// This captures the essential behavior without needing a full H&D curve.
+
+__DEVICE__ float negative_curve(float x, float gamma, float toe_strength, float shoulder_strength) {
+    // x: linear input (scene-referred)
+    // gamma: mid-tone slope (0.5-0.8 typical for negative)
+    // toe_strength: shadow compression (0-1)
+    // shoulder_strength: highlight compression (0-1)
+
+    if (x <= 0.0f) return 0.0f;
+
+    // Basic power function for gamma
+    float y = _powf(x, gamma);
+
+    // Toe: soft transition in shadows
+    // Formula: y = y * x / (x + toe) - creates gentle rolloff near black
+    if (toe_strength > 0.0f) {
+        float toe = toe_strength * 0.1f;  // Scale to reasonable range
+        float toe_factor = x / (x + toe);
+        y = y * lerpf(1.0f, toe_factor, toe_strength);
+    }
+
+    // Shoulder: compress highlights
+    // Formula: y = y / (1 + shoulder * y) - Reinhard-style compression
+    if (shoulder_strength > 0.0f) {
+        float compress = shoulder_strength * 0.5f;
+        y = y / (1.0f + compress * y);
+    }
+
+    return y;
+}
+
+__DEVICE__ float3 apply_negative_curves(float3 rgb,
+                                          float r_gamma, float g_gamma, float b_gamma,
+                                          float toe, float shoulder) {
+    return make_float3(
+        negative_curve(rgb.x, r_gamma, toe, shoulder),
+        negative_curve(rgb.y, g_gamma, toe, shoulder),
+        negative_curve(rgb.z, b_gamma, toe, shoulder)
+    );
+}
+
+// ============================================================================
+// DYE DENSITY / CROSSTALK
+// ============================================================================
+// WHY: In real negative film, CMY dye layers are stacked. When one layer
+// forms dye, it affects light passing through to other layers. This creates:
+// - Reds that lean orange (yellow dye affects magenta layer readout)
+// - Cyans that are less pure (overlap of yellow and magenta absorption)
+// - Overall color "coupling" that feels organic
+//
+// We model this as channel crosstalk in linear space.
+
+__DEVICE__ float3x3 crosstalk_matrix(float rg, float rb, float gr, float gb, float br, float bg) {
+    float3 r_row = make_float3(1.0f - rg - rb, rg, rb);
+    float3 g_row = make_float3(gr, 1.0f - gr - gb, gb);
+    float3 b_row = make_float3(br, bg, 1.0f - br - bg);
+    return make_float3x3(r_row, g_row, b_row);
+}
+
+// ============================================================================
+// HUE-DEPENDENT DENSITY
+// ============================================================================
+// WHY: Different hues build different amounts of dye. CMY hues (which
+// correspond to single dye layers) typically show stronger density than
+// RGB hues (which require multiple layers to cancel out).
+//
+// This is why saturated yellows and cyans get darker faster than saturated
+// reds and greens - it's the physics of subtractive color.
+
+__DEVICE__ float hue_angle(float3 rgb) {
+    float a = 0.5f * (2.0f * rgb.x - rgb.y - rgb.z);
+    float b = (rgb.y - rgb.z) * 0.86602540378f;
+    float h = _atan2f(b, a);
+    if (h < 0.0f) h += 6.28318530718f;
+    return h;
+}
+
+__DEVICE__ float gaussian_weight(float x, float center, float width) {
+    float d = x - center;
+    if (d > 3.14159265359f) d -= 6.28318530718f;
+    if (d < -3.14159265359f) d += 6.28318530718f;
+    return _expf(-d * d / (2.0f * width * width));
+}
+
+__DEVICE__ float3 apply_hue_density(float3 rgb, float global_density,
+                                     float cyan_mult, float magenta_mult, float yellow_mult,
+                                     float red_mult, float green_mult, float blue_mult) {
+    float sat = saturation_mask(rgb);
+    if (sat <= 0.0f) return rgb;
+
+    float hue = hue_angle(rgb);
+    float PI = 3.14159265359f;
+
+    float hue_mult = 1.0f;
+    hue_mult += (red_mult - 1.0f) * gaussian_weight(hue, 0.0f, 0.6f);
+    hue_mult += (yellow_mult - 1.0f) * gaussian_weight(hue, PI / 3.0f, 0.6f);
+    hue_mult += (green_mult - 1.0f) * gaussian_weight(hue, 2.0f * PI / 3.0f, 0.6f);
+    hue_mult += (cyan_mult - 1.0f) * gaussian_weight(hue, PI, 0.6f);
+    hue_mult += (blue_mult - 1.0f) * gaussian_weight(hue, 4.0f * PI / 3.0f, 0.6f);
+    hue_mult += (magenta_mult - 1.0f) * gaussian_weight(hue, 5.0f * PI / 3.0f, 0.6f);
+
+    float effective_density = global_density * hue_mult;
+    float factor = _powf(1.0f / (1.0f + 0.5f * sat * sat), effective_density);
+
+    return rgb * factor;
+}
+
+// ============================================================================
+// INTERLAYER EFFECTS
+// ============================================================================
+// WHY: In real film, the three emulsion layers are physically stacked.
+// Light passes through one layer before reaching the next. Development
+// byproducts from one layer can inhibit or enhance adjacent layers.
+//
+// This creates subtle "color coupling" that's different from simple crosstalk.
+// For example, a strong red exposure can slightly inhibit the green layer
+// development, creating a color shift that depends on exposure level.
+//
+// We model this as saturation-weighted channel influence.
+
+__DEVICE__ float3 apply_interlayer(float3 rgb, float rg_influence, float gb_influence, float br_influence) {
+    // Each channel influences its neighbor based on saturation
+    // This creates exposure-dependent color shifts
+
+    float sat = saturation_mask(rgb);
+    if (sat <= 0.0f) return rgb;
+
+    float3 result;
+
+    // R influences G (weighted by how strong R is relative to others)
+    float r_weight = rgb.x / (rgb.x + rgb.y + rgb.z + 0.001f);
+    result.y = rgb.y * (1.0f - rg_influence * r_weight * sat);
+
+    // G influences B
+    float g_weight = rgb.y / (rgb.x + rgb.y + rgb.z + 0.001f);
+    result.z = rgb.z * (1.0f - gb_influence * g_weight * sat);
+
+    // B influences R
+    float b_weight = rgb.z / (rgb.x + rgb.y + rgb.z + 0.001f);
+    result.x = rgb.x * (1.0f - br_influence * b_weight * sat);
+
+    return result;
+}
+
+// ============================================================================
+// HALATION PLACEHOLDER
+// ============================================================================
+// WHY: Real halation is a spatial blur of the red channel caused by light
+// bouncing off the film base. It requires a blur kernel which is expensive.
+//
+// For now, we provide a simple approximation: red channel "glow" into
+// adjacent channels at high exposure. This isn't true halation but hints at
+// it without needing convolution.
+//
+// TRUE HALATION would need a separate spatial blur pass, which could be done
+// in Fusion or as a separate node with ResolveFX blur.
+
+__DEVICE__ float3 apply_halation_hint(float3 rgb, float strength, float threshold) {
+    // Simple red bleed at high luminance - NOT true halation
+    // Just a color shift that suggests the effect
+
+    if (strength <= 0.0f) return rgb;
+
+    float lum = luminance_dwg(rgb);
+    if (lum <= threshold) return rgb;
+
+    float blend = (lum - threshold) / (lum - threshold + 0.5f);
+    blend = blend * strength;
+
+    // Red bleeds into green/blue slightly
+    float3 result = rgb;
+    result.y = rgb.y + rgb.x * blend * 0.1f;
+    result.z = rgb.z + rgb.x * blend * 0.05f;
+
+    return result;
+}
+
+// ============================================================================
+// UI PARAMETERS
+// ============================================================================
+
+// Preset Selection
+DEFINE_UI_PARAMS(preset, Negative Stock, DCTLUI_COMBO_BOX, 0, {p_none, p_5219, p_5207, p_eterna, p_portra}, {Manual, Kodak 5219 500T, Kodak 5207 250D, Fuji Eterna 500, Portra 400})
+
+// Spectral Sensitivity
+DEFINE_UI_PARAMS(spectral_enable, Enable Spectral, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(spec_rg, Red sees Green, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(spec_rb, Red sees Blue, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(spec_gr, Green sees Red, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(spec_gb, Green sees Blue, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(spec_br, Blue sees Red, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(spec_bg, Blue sees Green, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+
+// Density Curves
+DEFINE_UI_PARAMS(curves_enable, Enable Curves, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(gamma_r, Gamma Red, DCTLUI_SLIDER_FLOAT, 0.65, 0.3, 1.0, 0.01)
+DEFINE_UI_PARAMS(gamma_g, Gamma Green, DCTLUI_SLIDER_FLOAT, 0.65, 0.3, 1.0, 0.01)
+DEFINE_UI_PARAMS(gamma_b, Gamma Blue, DCTLUI_SLIDER_FLOAT, 0.65, 0.3, 1.0, 0.01)
+DEFINE_UI_PARAMS(toe, Toe Strength, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(shoulder, Shoulder Strength, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 1.0, 0.01)
+
+// Crosstalk
+DEFINE_UI_PARAMS(crosstalk_enable, Enable Crosstalk, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(ct_rg, R to G, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_rb, R to B, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_gr, G to R, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_gb, G to B, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_br, B to R, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_bg, B to G, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+
+// Hue-Dependent Density
+DEFINE_UI_PARAMS(hue_density_enable, Enable Hue Density, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(density, Global Density, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(hd_cyan, Density Cyan, DCTLUI_SLIDER_FLOAT, 1.5, 0.0, 3.0, 0.01)
+DEFINE_UI_PARAMS(hd_mag, Density Magenta, DCTLUI_SLIDER_FLOAT, 1.5, 0.0, 3.0, 0.01)
+DEFINE_UI_PARAMS(hd_yel, Density Yellow, DCTLUI_SLIDER_FLOAT, 1.5, 0.0, 3.0, 0.01)
+DEFINE_UI_PARAMS(hd_red, Density Red, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 3.0, 0.01)
+DEFINE_UI_PARAMS(hd_grn, Density Green, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 3.0, 0.01)
+DEFINE_UI_PARAMS(hd_blu, Density Blue, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 3.0, 0.01)
+
+// Interlayer Effects
+DEFINE_UI_PARAMS(interlayer_enable, Enable Interlayer, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(il_rg, R→G Inhibit, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
+DEFINE_UI_PARAMS(il_gb, G→B Inhibit, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
+DEFINE_UI_PARAMS(il_br, B→R Inhibit, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
+
+// Halation Hint (not true spatial halation)
+DEFINE_UI_PARAMS(halation_enable, Enable Halation Hint, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(halation_str, Halation Strength, DCTLUI_SLIDER_FLOAT, 0.3, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(halation_thresh, Halation Threshold, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+
+// ============================================================================
+// MAIN TRANSFORM
+// ============================================================================
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, float p_B) {
+
+    float3 rgb = make_float3(p_R, p_G, p_B);
+    float3 work = di_to_linear_f3(rgb);
+
+    // ========== LOAD PRESETS ==========
+    // Each preset models a specific negative film stock
+
+    float _spec_rg = spec_rg, _spec_rb = spec_rb, _spec_gr = spec_gr;
+    float _spec_gb = spec_gb, _spec_br = spec_br, _spec_bg = spec_bg;
+    float _gamma_r = gamma_r, _gamma_g = gamma_g, _gamma_b = gamma_b;
+    float _toe = toe, _shoulder = shoulder;
+    float _ct_rg = ct_rg, _ct_rb = ct_rb, _ct_gr = ct_gr;
+    float _ct_gb = ct_gb, _ct_br = ct_br, _ct_bg = ct_bg;
+    float _density = density;
+    float _hd_cyan = hd_cyan, _hd_mag = hd_mag, _hd_yel = hd_yel;
+    float _hd_red = hd_red, _hd_grn = hd_grn, _hd_blu = hd_blu;
+    float _il_rg = il_rg, _il_gb = il_gb, _il_br = il_br;
+    float _hal_str = halation_str, _hal_thresh = halation_thresh;
+
+    int _spec_en = spectral_enable, _curves_en = curves_enable;
+    int _ct_en = crosstalk_enable, _hd_en = hue_density_enable;
+    int _il_en = interlayer_enable, _hal_en = halation_enable;
+
+    if (preset == p_5219) {
+        // Kodak Vision3 5219 500T - Tungsten balanced, cinema workhorse
+        // Characteristics: Warm shadows, clean highlights, great skin tones
+        // Lower gamma (0.6) because it expects print to add contrast
+        _spec_rg = 0.03f; _spec_gr = 0.02f; _spec_en = 1;
+        _gamma_r = 0.62f; _gamma_g = 0.60f; _gamma_b = 0.58f;
+        _toe = 0.6f; _shoulder = 0.4f; _curves_en = 1;
+        _ct_rg = 0.015f; _ct_gb = 0.02f; _ct_en = 1;
+        _density = 0.5f;
+        _hd_cyan = 1.6f; _hd_mag = 1.4f; _hd_yel = 1.5f;
+        _hd_red = 1.0f; _hd_grn = 0.9f; _hd_blu = 1.1f; _hd_en = 1;
+        _il_rg = 0.05f; _il_gb = 0.03f; _il_br = 0.02f; _il_en = 1;
+    }
+    else if (preset == p_5207) {
+        // Kodak Vision3 5207 250D - Daylight balanced, sharper grain
+        // Characteristics: Neutral, higher contrast than 500T, clean blues
+        _spec_rg = 0.02f; _spec_gb = 0.015f; _spec_en = 1;
+        _gamma_r = 0.65f; _gamma_g = 0.63f; _gamma_b = 0.61f;
+        _toe = 0.5f; _shoulder = 0.5f; _curves_en = 1;
+        _ct_rg = 0.01f; _ct_gb = 0.015f; _ct_en = 1;
+        _density = 0.45f;
+        _hd_cyan = 1.5f; _hd_mag = 1.3f; _hd_yel = 1.4f;
+        _hd_red = 1.0f; _hd_grn = 0.95f; _hd_blu = 1.15f; _hd_en = 1;
+        _il_rg = 0.04f; _il_gb = 0.04f; _il_br = 0.02f; _il_en = 1;
+    }
+    else if (preset == p_eterna) {
+        // Fuji Eterna 500 - Japanese cinema negative
+        // Characteristics: Cooler, restrained saturation, subtle greens
+        _spec_gr = 0.015f; _spec_bg = 0.02f; _spec_en = 1;
+        _gamma_r = 0.60f; _gamma_g = 0.58f; _gamma_b = 0.62f;
+        _toe = 0.55f; _shoulder = 0.45f; _curves_en = 1;
+        _ct_gb = 0.015f; _ct_bg = 0.01f; _ct_en = 1;
+        _density = 0.4f;
+        _hd_cyan = 1.5f; _hd_mag = 1.3f; _hd_yel = 1.4f;
+        _hd_red = 1.0f; _hd_grn = 0.85f; _hd_blu = 1.2f; _hd_en = 1;
+        _il_rg = 0.03f; _il_gb = 0.05f; _il_br = 0.02f; _il_en = 1;
+    }
+    else if (preset == p_portra) {
+        // Kodak Portra 400 - Portrait film (still photography)
+        // Characteristics: Flattering skin, warm, pastel-like saturation
+        _spec_rg = 0.04f; _spec_gr = 0.03f; _spec_en = 1;
+        _gamma_r = 0.68f; _gamma_g = 0.65f; _gamma_b = 0.62f;
+        _toe = 0.4f; _shoulder = 0.3f; _curves_en = 1;
+        _ct_rg = 0.01f; _ct_en = 1;
+        _density = 0.35f;
+        _hd_cyan = 1.3f; _hd_mag = 1.4f; _hd_yel = 1.5f;
+        _hd_red = 0.85f; _hd_grn = 0.9f; _hd_blu = 1.0f; _hd_en = 1;
+        _il_rg = 0.02f; _il_gb = 0.02f; _il_br = 0.01f; _il_en = 1;
+    }
+
+    // ========== PROCESSING CHAIN ==========
+    // Order matters! This follows the light path through film.
+
+    // 1. SPECTRAL SENSITIVITY (first - how film "sees" the scene)
+    // This happens at exposure, before dye formation
+    if (_spec_en) {
+        float3x3 spec = spectral_sensitivity_matrix(_spec_rg, _spec_rb, _spec_gr, _spec_gb, _spec_br, _spec_bg);
+        work = mv_33_3(spec, work);
+    }
+
+    // 2. DENSITY CURVES (the characteristic curve response)
+    // This is the core negative behavior - how exposure becomes density
+    if (_curves_en) {
+        work = apply_negative_curves(work, _gamma_r, _gamma_g, _gamma_b, _toe, _shoulder);
+    }
+
+    // 3. HUE-DEPENDENT DENSITY
+    // CMY dyes darken saturated colors more than RGB
+    if (_hd_en) {
+        work = apply_hue_density(work, _density,
+                                  _hd_cyan, _hd_mag, _hd_yel,
+                                  _hd_red, _hd_grn, _hd_blu);
+    }
+
+    // 4. CROSSTALK (dye layer interaction)
+    // Adjacent dye layers affect each other's appearance
+    if (_ct_en) {
+        float3x3 ct = crosstalk_matrix(_ct_rg, _ct_rb, _ct_gr, _ct_gb, _ct_br, _ct_bg);
+        work = mv_33_3(ct, work);
+    }
+
+    // 5. INTERLAYER EFFECTS (development interaction)
+    // Chemical byproducts from one layer affect adjacent layers
+    if (_il_en) {
+        work = apply_interlayer(work, _il_rg, _il_gb, _il_br);
+    }
+
+    // 6. HALATION HINT (red glow in highlights)
+    // Not true halation - just a color shift to suggest the effect
+    if (_hal_en) {
+        work = apply_halation_hint(work, _hal_str, _hal_thresh);
+    }
+
+    // Convert back to log for output
+    rgb = linear_to_di_f3(work);
+
+    return rgb;
+}

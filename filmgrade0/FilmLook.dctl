@@ -289,6 +289,43 @@ __DEVICE__ float3x3 crosstalk_matrix(float rg, float rb, float gr, float gb, flo
 }
 
 // ============================================================================
+// INTERLAYER EFFECTS (Channel Inhibition)
+// ============================================================================
+// In real film, emulsion layers are physically stacked. Development byproducts
+// from one layer can inhibit adjacent layers. This creates saturation-dependent
+// color separation - the OPPOSITE of crosstalk.
+//
+// Crosstalk: channels bleed together (colors become muddier)
+// Interlayer: dominant channels suppress neighbors (colors become more distinct)
+//
+// This effect is unique - Resolve has no native equivalent.
+
+__DEVICE__ float3 apply_interlayer(float3 rgb, float rg, float gr, float gb, float bg, float br, float rb) {
+    // Each channel suppresses its neighbors based on relative strength
+    // rg = red suppresses green, gr = green suppresses red, etc.
+    // Effect scales with saturation - neutral colors pass through unchanged
+
+    float sat = saturation_mask(rgb);
+    if (sat <= 0.0f) return rgb;
+
+    float sum = rgb.x + rgb.y + rgb.z + 0.0001f;  // Avoid divide by zero
+
+    // Calculate relative channel weights (how dominant each channel is)
+    float r_weight = rgb.x / sum;
+    float g_weight = rgb.y / sum;
+    float b_weight = rgb.z / sum;
+
+    // Apply inhibition: dominant channels suppress their targets
+    // Multiply by saturation so neutral colors are unaffected
+    float3 result;
+    result.x = rgb.x * (1.0f - sat * (gr * g_weight + br * b_weight));
+    result.y = rgb.y * (1.0f - sat * (rg * r_weight + bg * b_weight));
+    result.z = rgb.z * (1.0f - sat * (rb * r_weight + gb * g_weight));
+
+    return result;
+}
+
+// ============================================================================
 // GLOBAL DENSITY
 // ============================================================================
 
@@ -402,6 +439,42 @@ __DEVICE__ float gaussian_weight(float x, float center, float width) {
 }
 
 // ============================================================================
+// HUE-DEPENDENT DENSITY
+// ============================================================================
+
+__DEVICE__ float3 apply_hue_density(float3 rgb, float global_density,
+                                     float cyan_mult, float magenta_mult, float yellow_mult,
+                                     float red_mult, float green_mult, float blue_mult) {
+    // Film dye density varies by hue - CMY dyes (subtractive primaries) typically
+    // have stronger density response than RGB hues
+    // This darkens saturated colors with per-hue control
+
+    float sat = saturation_mask(rgb);
+    if (sat <= 0.0f) return rgb;
+
+    float hue = hue_angle(rgb);
+    float PI = 3.14159265359f;
+
+    // Calculate hue-dependent density multiplier using gaussian weights
+    // Hue positions: R=0, Y=PI/3, G=2PI/3, C=PI, B=4PI/3, M=5PI/3
+    float hue_mult = 1.0f;
+
+    // Use wider gaussian (0.6) for smooth blending between zones
+    hue_mult += (red_mult - 1.0f) * gaussian_weight(hue, 0.0f, 0.6f);
+    hue_mult += (yellow_mult - 1.0f) * gaussian_weight(hue, PI / 3.0f, 0.6f);
+    hue_mult += (green_mult - 1.0f) * gaussian_weight(hue, 2.0f * PI / 3.0f, 0.6f);
+    hue_mult += (cyan_mult - 1.0f) * gaussian_weight(hue, PI, 0.6f);
+    hue_mult += (blue_mult - 1.0f) * gaussian_weight(hue, 4.0f * PI / 3.0f, 0.6f);
+    hue_mult += (magenta_mult - 1.0f) * gaussian_weight(hue, 5.0f * PI / 3.0f, 0.6f);
+
+    // Apply density with hue-dependent multiplier
+    float effective_density = global_density * hue_mult;
+    float factor = _powf(1.0f / (1.0f + 0.5f * sat * sat), effective_density);
+
+    return rgb * factor;
+}
+
+// ============================================================================
 // SATURATION-TO-HUE ROTATION
 // ============================================================================
 
@@ -476,13 +549,22 @@ DEFINE_UI_PARAMS(preset, Film Preset, DCTLUI_COMBO_BOX, 0, {p_none, p_kodak5219,
 
 // Global Density
 DEFINE_UI_PARAMS(density_enable, Enable Density, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(density, Global Density, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(density, Global Density, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 4.0, 0.01)
+
+// Hue-Dependent Density (per-hue multipliers - 1.0 = neutral, >1 = more density, <1 = less)
+DEFINE_UI_PARAMS(hue_density_enable, Enable Hue Density, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(hue_dens_cyan, Density Cyan, DCTLUI_SLIDER_FLOAT, 1.5, 0.0, 3.0, 0.01)
+DEFINE_UI_PARAMS(hue_dens_mag, Density Magenta, DCTLUI_SLIDER_FLOAT, 1.5, 0.0, 3.0, 0.01)
+DEFINE_UI_PARAMS(hue_dens_yel, Density Yellow, DCTLUI_SLIDER_FLOAT, 1.5, 0.0, 3.0, 0.01)
+DEFINE_UI_PARAMS(hue_dens_red, Density Red, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 3.0, 0.01)
+DEFINE_UI_PARAMS(hue_dens_grn, Density Green, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 3.0, 0.01)
+DEFINE_UI_PARAMS(hue_dens_blu, Density Blue, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 3.0, 0.01)
 
 // RGB Density
 DEFINE_UI_PARAMS(rgb_density_enable, Enable RGB Density, DCTLUI_CHECK_BOX, 0)
-DEFINE_UI_PARAMS(r_density, Red Density, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.01)
-DEFINE_UI_PARAMS(g_density, Green Density, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.01)
-DEFINE_UI_PARAMS(b_density, Blue Density, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(r_density, Red Density, DCTLUI_SLIDER_FLOAT, 0.0, -2.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(g_density, Green Density, DCTLUI_SLIDER_FLOAT, 0.0, -2.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(b_density, Blue Density, DCTLUI_SLIDER_FLOAT, 0.0, -2.0, 2.0, 0.01)
 
 // Channel Crosstalk
 DEFINE_UI_PARAMS(crosstalk_enable, Enable Crosstalk, DCTLUI_CHECK_BOX, 0)
@@ -492,6 +574,16 @@ DEFINE_UI_PARAMS(ct_gr, G to R, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
 DEFINE_UI_PARAMS(ct_gb, G to B, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
 DEFINE_UI_PARAMS(ct_br, B to R, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
 DEFINE_UI_PARAMS(ct_bg, B to G, DCTLUI_SLIDER_FLOAT, 0.0, -0.2, 0.2, 0.001)
+DEFINE_UI_PARAMS(ct_mix, Crosstalk Mix, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.0, 0.01)
+
+// Interlayer Effects (opposite of crosstalk - channel inhibition for color separation)
+DEFINE_UI_PARAMS(interlayer_enable, Enable Interlayer, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(il_rg, R inhibits G, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
+DEFINE_UI_PARAMS(il_gr, G inhibits R, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
+DEFINE_UI_PARAMS(il_gb, G inhibits B, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
+DEFINE_UI_PARAMS(il_bg, B inhibits G, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
+DEFINE_UI_PARAMS(il_br, B inhibits R, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
+DEFINE_UI_PARAMS(il_rb, R inhibits B, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 0.5, 0.01)
 
 // Overall Hue Rotation
 DEFINE_UI_PARAMS(hue_enable, Enable Hue Rotation, DCTLUI_CHECK_BOX, 0)
@@ -529,6 +621,7 @@ DEFINE_UI_PARAMS(purity_enable, Enable Purity, DCTLUI_CHECK_BOX, 0)
 DEFINE_UI_PARAMS(purity_r, Purity R, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 1.0, 0.01)
 DEFINE_UI_PARAMS(purity_g, Purity G, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 1.0, 0.01)
 DEFINE_UI_PARAMS(purity_b, Purity B, DCTLUI_SLIDER_FLOAT, 0.0, -0.5, 1.0, 0.01)
+DEFINE_UI_PARAMS(purity_mix, Purity Mix, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.0, 0.01)
 
 // Highlight Rolloff
 DEFINE_UI_PARAMS(rolloff_enable, Enable Highlight Rolloff, DCTLUI_CHECK_BOX, 0)
@@ -561,6 +654,8 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
 
     // ========== PRESET LOADING ==========
     float _density = density;
+    float _hd_cyan = hue_dens_cyan, _hd_mag = hue_dens_mag, _hd_yel = hue_dens_yel;
+    float _hd_red = hue_dens_red, _hd_grn = hue_dens_grn, _hd_blu = hue_dens_blu;
     float _r_dens = r_density, _g_dens = g_density, _b_dens = b_density;
     float _ct_rg = ct_rg, _ct_rb = ct_rb, _ct_gr = ct_gr, _ct_gb = ct_gb, _ct_br = ct_br, _ct_bg = ct_bg;
     float _hue_r = hue_r, _hue_g = hue_g, _hue_b = hue_b;
@@ -568,7 +663,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     float _rolloff_str = rolloff_strength, _rolloff_thresh = rolloff_threshold;
     float _sat_rolloff_str = sat_rolloff_strength, _sat_rolloff_thresh = sat_rolloff_threshold;
     float _fog_level = fog_level, _fog_r = fog_r, _fog_g = fog_g, _fog_b = fog_b;
-    int _density_en = density_enable, _rgb_dens_en = rgb_density_enable;
+    int _density_en = density_enable, _hue_dens_en = hue_density_enable, _rgb_dens_en = rgb_density_enable;
     int _crosstalk_en = crosstalk_enable, _hue_en = hue_enable, _purity_en = purity_enable;
     int _rolloff_en = rolloff_enable, _sat_rolloff_en = sat_rolloff_enable, _fog_en = fog_enable;
 
@@ -577,6 +672,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         // Known for: rich warm shadows, subtle cyan highlights, natural skin tones
         // Medium saturation, smooth highlight rolloff, slight warm fog
         _density = 0.6f; _density_en = 1;
+        _hd_cyan = 1.6f; _hd_mag = 1.4f; _hd_yel = 1.5f; _hd_red = 1.0f; _hd_grn = 0.9f; _hd_blu = 1.1f; _hue_dens_en = 1;
         _hue_r = 0.04f; _hue_g = -0.02f; _hue_b = 0.08f; _hue_en = 1;
         _ct_rg = 0.015f; _ct_gb = 0.02f; _crosstalk_en = 1;
         _purity_r = 0.15f; _purity_g = 0.08f; _purity_b = 0.12f; _purity_en = 1;
@@ -587,6 +683,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         // Kodak 2383 Print Stock - Cinema print film
         // Known for: punchy contrast, saturated reds, teal shadows, strong rolloff
         _density = 0.9f; _density_en = 1;
+        _hd_cyan = 1.8f; _hd_mag = 1.7f; _hd_yel = 1.6f; _hd_red = 0.9f; _hd_grn = 1.0f; _hd_blu = 1.2f; _hue_dens_en = 1;
         _hue_r = 0.06f; _hue_g = -0.08f; _hue_b = 0.15f; _hue_en = 1;
         _ct_gr = 0.01f; _ct_gb = 0.025f; _crosstalk_en = 1;
         _purity_r = 0.25f; _purity_g = 0.1f; _purity_b = 0.08f; _purity_en = 1;
@@ -597,6 +694,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         // Fuji Eterna 500 - Japanese cinema negative
         // Known for: cooler palette, restrained greens, subtle blues, low fog
         _density = 0.5f; _density_en = 1;
+        _hd_cyan = 1.5f; _hd_mag = 1.3f; _hd_yel = 1.4f; _hd_red = 1.0f; _hd_grn = 0.85f; _hd_blu = 1.2f; _hue_dens_en = 1;
         _hue_r = -0.03f; _hue_g = -0.06f; _hue_b = 0.05f; _hue_en = 1;
         _ct_gb = 0.015f; _ct_bg = 0.01f; _crosstalk_en = 1;
         _purity_r = 0.08f; _purity_g = 0.12f; _purity_b = 0.18f; _purity_en = 1;
@@ -607,6 +705,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         // Kodak Portra 400 - Portrait/wedding still film
         // Known for: flattering skin tones, pastel colors, low contrast, warm cast
         _density = 0.35f; _density_en = 1;
+        _hd_cyan = 1.3f; _hd_mag = 1.4f; _hd_yel = 1.5f; _hd_red = 0.85f; _hd_grn = 0.9f; _hd_blu = 1.0f; _hue_dens_en = 1;
         _hue_r = 0.08f; _hue_g = 0.03f; _hue_b = -0.02f; _hue_en = 1;
         _ct_rg = 0.01f; _crosstalk_en = 1;
         _purity_r = 0.1f; _purity_g = 0.0f; _purity_b = -0.12f; _purity_en = 1;
@@ -617,6 +716,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         // Cinestill 800T - Remjet-removed cinema stock for still cameras
         // Known for: halation-ready, tungsten balanced, punchy reds, cyan shadows
         _density = 0.55f; _density_en = 1;
+        _hd_cyan = 1.7f; _hd_mag = 1.5f; _hd_yel = 1.4f; _hd_red = 0.95f; _hd_grn = 1.0f; _hd_blu = 1.3f; _hue_dens_en = 1;
         _hue_r = 0.1f; _hue_g = -0.02f; _hue_b = 0.18f; _hue_en = 1;
         _ct_rg = 0.025f; _ct_rb = 0.01f; _crosstalk_en = 1;
         _purity_r = 0.3f; _purity_g = 0.05f; _purity_b = 0.15f; _purity_en = 1;
@@ -627,9 +727,16 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
 
     // ========== APPLY EFFECTS ==========
 
-    // 1. Global Density (in linear)
-    if (_density_en) {
+    // 1. Global Density (in linear) - uniform across all hues
+    if (_density_en && !_hue_dens_en) {
         work = apply_density(work, _density);
+    }
+
+    // 1b. Hue-Dependent Density (in linear) - CMY can have stronger density than RGB
+    if (_hue_dens_en) {
+        work = apply_hue_density(work, _density,
+                                  _hd_cyan, _hd_mag, _hd_yel,
+                                  _hd_red, _hd_grn, _hd_blu);
     }
 
     // 2. RGB Density (in log space)
@@ -641,8 +748,15 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
 
     // 3. Channel Crosstalk
     if (_crosstalk_en) {
+        float3 work_pre = work;
         float3x3 ct = crosstalk_matrix(_ct_rg, _ct_rb, _ct_gr, _ct_gb, _ct_br, _ct_bg);
         work = mv_33_3(ct, work);
+        work = lerpf3(work_pre, work, ct_mix);
+    }
+
+    // 3b. Interlayer Effects (opposite of crosstalk - channel inhibition)
+    if (interlayer_enable) {
+        work = apply_interlayer(work, il_rg, il_gr, il_gb, il_bg, il_br, il_rb);
     }
 
     // 4. Overall Hue Rotation
@@ -668,8 +782,10 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
 
     // 7. Purity
     if (_purity_en) {
+        float3 work_pre = work;
         float3x3 pur = purity_matrix(_purity_r / 10.0f, _purity_g / 10.0f, _purity_b / 10.0f, 1);
         work = mv_33_3(pur, work);
+        work = lerpf3(work_pre, work, purity_mix);
     }
 
     // 8. Highlight Rolloff (soft clipping)
