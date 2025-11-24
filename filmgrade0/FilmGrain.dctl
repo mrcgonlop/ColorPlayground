@@ -1,0 +1,427 @@
+/*----------------------------------------------------------------------
+    FilmGrain - Physical Film Grain Emulation
+    v0.1.0
+
+    Procedural film grain based on physical silver halide emulsion
+    characteristics. Features density-dependent grain response matching
+    real negative and positive film behavior.
+
+    Input: DaVinci Wide Gamut / DaVinci Intermediate (Log)
+    Output: DaVinci Wide Gamut / DaVinci Intermediate (Log)
+
+    Based on research from:
+    - AV1 Film Grain Synthesis (Autoregressive model)
+    - Newson et al. "Realistic Film Grain Rendering" (Stochastic model)
+    - Dehancer's physical emulsion modeling
+    - Steve Yedlin's probabilistic grain analysis
+
+    Key features:
+    - Density-dependent grain (bell curve response)
+    - Negative vs Positive film modes
+    - Per-channel independent noise (as in real film)
+    - Autoregressive correlation for grain clumping
+    - Resolution-aware scaling
+----------------------------------------------------------------------*/
+
+// ============================================================================
+// MATH HELPERS
+// ============================================================================
+
+__DEVICE__ float clampf(float x, float lo, float hi) {
+    return _fmaxf(lo, _fminf(x, hi));
+}
+
+__DEVICE__ float lerpf(float a, float b, float t) {
+    return a + t * (b - a);
+}
+
+__DEVICE__ float3 lerpf3(float3 a, float3 b, float t) {
+    return make_float3(lerpf(a.x, b.x, t), lerpf(a.y, b.y, t), lerpf(a.z, b.z, t));
+}
+
+// ============================================================================
+// LOG ENCODING - DaVinci Intermediate
+// ============================================================================
+
+__DEVICE__ float di_to_linear(float x) {
+    const float A = 0.0075f;
+    const float B = 7.0f;
+    const float C = 0.07329248f;
+    const float M = 10.44426855f;
+    const float LOG_CUT = 0.02740668f;
+    return x <= LOG_CUT ? x / M : _exp2f(x / C - B) - A;
+}
+
+__DEVICE__ float linear_to_di(float x) {
+    const float A = 0.0075f;
+    const float B = 7.0f;
+    const float C = 0.07329248f;
+    const float M = 10.44426855f;
+    const float LIN_CUT = 0.00262409f;
+    return x <= LIN_CUT ? x * M : (_log2f(x + A) + B) * C;
+}
+
+__DEVICE__ float3 di_to_linear_f3(float3 v) {
+    return make_float3(di_to_linear(v.x), di_to_linear(v.y), di_to_linear(v.z));
+}
+
+__DEVICE__ float3 linear_to_di_f3(float3 v) {
+    return make_float3(linear_to_di(v.x), linear_to_di(v.y), linear_to_di(v.z));
+}
+
+// ============================================================================
+// LUMINANCE
+// ============================================================================
+
+#define DWG_Y make_float3(0.274118483067f, 0.873631775379f, -0.147750422359f)
+
+__DEVICE__ float luminance_dwg(float3 rgb) {
+    return rgb.x * DWG_Y.x + rgb.y * DWG_Y.y + rgb.z * DWG_Y.z;
+}
+
+// ============================================================================
+// HASH / NOISE FUNCTIONS
+// ============================================================================
+
+// High-quality hash functions for noise generation
+// Based on PCG and xxHash principles for good statistical properties
+
+__DEVICE__ unsigned int hash_u32(unsigned int x) {
+    x = ((x >> 16) ^ x) * 0x45d9f3b;
+    x = ((x >> 16) ^ x) * 0x45d9f3b;
+    x = (x >> 16) ^ x;
+    return x;
+}
+
+__DEVICE__ unsigned int hash_u32_2d(unsigned int x, unsigned int y) {
+    unsigned int h = x * 374761393u + y * 668265263u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return h ^ (h >> 16);
+}
+
+__DEVICE__ unsigned int hash_u32_3d(unsigned int x, unsigned int y, unsigned int z) {
+    unsigned int h = x * 374761393u + y * 668265263u + z * 2654435761u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return h ^ (h >> 16);
+}
+
+__DEVICE__ float hash_to_float(unsigned int h) {
+    // Convert hash to float in [0, 1)
+    return (float)(h & 0x7FFFFF) / (float)0x800000;
+}
+
+// ============================================================================
+// GAUSSIAN NOISE FROM UNIFORM (Box-Muller Transform)
+// ============================================================================
+
+__DEVICE__ float uniform_to_gaussian(float u1, float u2) {
+    // Box-Muller transform: convert two uniform samples to Gaussian
+    // Clamp u1 away from 0 to avoid log(0)
+    u1 = _fmaxf(u1, 1e-6f);
+    float r = _sqrtf(-2.0f * _logf(u1));
+    float theta = 6.28318530718f * u2;
+    return r * _cosf(theta);
+}
+
+__DEVICE__ float3 gaussian_noise_3d(int x, int y, unsigned int seed_r, unsigned int seed_g, unsigned int seed_b) {
+    // Generate three independent Gaussian samples for RGB
+    // Film grain is independent between color channels in the emulsion
+
+    unsigned int h_r1 = hash_u32_3d(x, y, seed_r);
+    unsigned int h_r2 = hash_u32_3d(x + 10000, y + 10000, seed_r);
+    unsigned int h_g1 = hash_u32_3d(x, y, seed_g);
+    unsigned int h_g2 = hash_u32_3d(x + 10000, y + 10000, seed_g);
+    unsigned int h_b1 = hash_u32_3d(x, y, seed_b);
+    unsigned int h_b2 = hash_u32_3d(x + 10000, y + 10000, seed_b);
+
+    return make_float3(
+        uniform_to_gaussian(hash_to_float(h_r1), hash_to_float(h_r2)),
+        uniform_to_gaussian(hash_to_float(h_g1), hash_to_float(h_g2)),
+        uniform_to_gaussian(hash_to_float(h_b1), hash_to_float(h_b2))
+    );
+}
+
+// ============================================================================
+// AUTOREGRESSIVE GRAIN CORRELATION
+// ============================================================================
+
+// The AV1 film grain model uses an autoregressive process:
+// G(x,y) = sum(a_i * G(neighbors)) + z
+// where z is unit-variance Gaussian noise
+//
+// This creates spatial correlation (grain clumping) which is essential
+// for realistic film grain appearance.
+//
+// We approximate this with a simplified 2-tap AR model that can be
+// computed per-pixel by sampling neighboring noise values.
+
+__DEVICE__ float3 ar_grain_sample(int x, int y, unsigned int seed_r, unsigned int seed_g, unsigned int seed_b,
+                                   float ar_coef, float grain_size) {
+    // Base noise at current position
+    float3 noise = gaussian_noise_3d(x, y, seed_r, seed_g, seed_b);
+
+    if (ar_coef <= 0.0f || grain_size <= 1.0f) {
+        return noise;
+    }
+
+    // Sample neighbors for AR correlation
+    // This creates the "clumping" effect of real film grain
+    int step = (int)_fmaxf(1.0f, grain_size * 0.5f);
+
+    float3 n_left = gaussian_noise_3d(x - step, y, seed_r, seed_g, seed_b);
+    float3 n_up = gaussian_noise_3d(x, y - step, seed_r, seed_g, seed_b);
+    float3 n_diag = gaussian_noise_3d(x - step, y - step, seed_r, seed_g, seed_b);
+
+    // AR combination with normalized weights
+    float ar_total = 1.0f + ar_coef * 3.0f;
+    float3 result = make_float3(
+        (noise.x + ar_coef * (n_left.x + n_up.x + n_diag.x)) / ar_total,
+        (noise.y + ar_coef * (n_left.y + n_up.y + n_diag.y)) / ar_total,
+        (noise.z + ar_coef * (n_left.z + n_up.z + n_diag.z)) / ar_total
+    );
+
+    // Renormalize to unit variance (approximately)
+    float variance_scale = _sqrtf(1.0f + ar_coef * ar_coef * 3.0f) / ar_total;
+    result = result / _fmaxf(variance_scale, 0.001f);
+
+    return result;
+}
+
+// ============================================================================
+// DENSITY-DEPENDENT GRAIN RESPONSE
+// ============================================================================
+
+// This is the critical function for realistic film grain.
+// Real film grain is NOT uniform across tonal values:
+//
+// NEGATIVE FILM:
+// - Maximum grain in highlights (Dmax - maximum silver density)
+// - High grain in deep shadows (Dmin - sparse crystals)
+// - Lower grain in midtones
+// - Creates a U-shaped or bimodal distribution
+//
+// POSITIVE FILM (Slides/Print):
+// - Softer grain overall
+// - Less pronounced in highlights
+// - More uniform distribution
+
+__DEVICE__ float density_response_negative(float lum) {
+    // Negative film: high grain at Dmax (highlights) and Dmin (shadows)
+    // This models the physical behavior where:
+    // - Highlights have maximum silver accumulation (Dmax) = high grain
+    // - Shadows have sparse crystals but print grain shows through = high grain
+    // - Midtones are balanced
+
+    // Shadow response (peaks around 0.1-0.15 in linear)
+    float shadow_peak = 0.12f;
+    float shadow_width = 0.10f;
+    float shadow = _expf(-_powf((lum - shadow_peak) / shadow_width, 2.0f));
+
+    // Highlight response (peaks around 0.7-0.9 in linear)
+    float highlight_peak = 0.80f;
+    float highlight_width = 0.25f;
+    float highlight = _expf(-_powf((lum - highlight_peak) / highlight_width, 2.0f));
+
+    // Midtone baseline (lower but not zero)
+    float midtone_center = 0.4f;
+    float midtone_width = 0.3f;
+    float midtone = 0.4f * _expf(-_powf((lum - midtone_center) / midtone_width, 2.0f));
+
+    // Combine with appropriate weights
+    // Highlights strongest (Dmax), shadows next (Dmin), midtones lowest
+    float response = shadow * 0.7f + midtone + highlight * 1.0f;
+
+    // Normalize to reasonable range
+    return clampf(response, 0.1f, 1.0f);
+}
+
+__DEVICE__ float density_response_positive(float lum) {
+    // Positive film (slides/print): softer, more uniform grain
+    // Less pronounced highlight grain than negative
+
+    // Gentler shadow response
+    float shadow_peak = 0.15f;
+    float shadow_width = 0.15f;
+    float shadow = 0.6f * _expf(-_powf((lum - shadow_peak) / shadow_width, 2.0f));
+
+    // Reduced highlight response
+    float highlight_peak = 0.75f;
+    float highlight_width = 0.30f;
+    float highlight = 0.4f * _expf(-_powf((lum - highlight_peak) / highlight_width, 2.0f));
+
+    // Stronger midtone presence (more uniform)
+    float midtone_center = 0.45f;
+    float midtone_width = 0.35f;
+    float midtone = 0.7f * _expf(-_powf((lum - midtone_center) / midtone_width, 2.0f));
+
+    float response = shadow + midtone + highlight;
+
+    return clampf(response, 0.15f, 0.9f);
+}
+
+// ============================================================================
+// TONAL ZONE RESPONSE (User-adjustable)
+// ============================================================================
+
+__DEVICE__ float tonal_zone_response(float lum, float shadows, float midtones, float highlights) {
+    // Allow user control over grain in each tonal zone
+    float shadow_weight = _expf(-_powf((lum - 0.15f) / 0.12f, 2.0f));
+    float mid_weight = _expf(-_powf((lum - 0.5f) / 0.25f, 2.0f));
+    float high_weight = _expf(-_powf((lum - 0.85f) / 0.15f, 2.0f));
+
+    return shadow_weight * shadows + mid_weight * midtones + high_weight * highlights;
+}
+
+// ============================================================================
+// GRAIN SIZE / RESOLUTION SCALING
+// ============================================================================
+
+__DEVICE__ float resolution_scale(int width, int height, float target_grain_size) {
+    // Scale grain to maintain consistent apparent size across resolutions
+    // Reference: 2K (2048x1080)
+    float ref_height = 1080.0f;
+    float scale = (float)height / ref_height;
+
+    // Larger values = coarser grain, smaller = finer
+    return target_grain_size * scale;
+}
+
+// ============================================================================
+// UI PARAMETERS
+// ============================================================================
+
+// Main Controls
+DEFINE_UI_PARAMS(enable, Enable Grain, DCTLUI_CHECK_BOX, 1)
+DEFINE_UI_PARAMS(amount, Amount, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(grain_size, Grain Size, DCTLUI_SLIDER_FLOAT, 1.0, 0.25, 4.0, 0.01)
+
+// Film Type
+DEFINE_UI_PARAMS(film_type, Film Type, DCTLUI_COMBO_BOX, 0, {type_negative, type_positive, type_custom}, {Negative Film, Positive Film, Custom})
+
+// Grain Character
+DEFINE_UI_PARAMS(ar_correlation, Grain Clumping, DCTLUI_SLIDER_FLOAT, 0.3, 0.0, 0.8, 0.01)
+DEFINE_UI_PARAMS(sharpness, Grain Sharpness, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 1.0, 0.01)
+
+// Color
+DEFINE_UI_PARAMS(chroma, Chroma Grain, DCTLUI_SLIDER_FLOAT, 0.3, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(rgb_balance, RGB Balance, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.01)
+
+// Tonal Distribution (Custom mode)
+DEFINE_UI_PARAMS(shadows, Shadows, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(midtones, Midtones, DCTLUI_SLIDER_FLOAT, 0.6, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(highlights, Highlights, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 2.0, 0.01)
+
+// Animation
+DEFINE_UI_PARAMS(animate, Animate Grain, DCTLUI_CHECK_BOX, 1)
+DEFINE_UI_PARAMS(seed, Seed / Frame, DCTLUI_SLIDER_INT, 1, 1, 1000, 1)
+
+// Processing
+DEFINE_UI_PARAMS(process_space, Process In, DCTLUI_COMBO_BOX, 1, {space_linear, space_log}, {Linear Light, Log Space})
+
+// Debug
+DEFINE_UI_PARAMS(show_grain, Show Grain Only, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(show_response, Show Response Curve, DCTLUI_CHECK_BOX, 0)
+
+// ============================================================================
+// MAIN TRANSFORM
+// ============================================================================
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, float p_B) {
+
+    float3 rgb = make_float3(p_R, p_G, p_B);
+
+    if (!enable) {
+        return rgb;
+    }
+
+    // Convert to linear for luminance calculation
+    float3 linear_rgb = di_to_linear_f3(rgb);
+    float lum = luminance_dwg(linear_rgb);
+    lum = clampf(lum, 0.0f, 1.0f);
+
+    // Show response curve mode (debug)
+    if (show_response) {
+        float x_norm = (float)p_X / (float)p_Width;
+        float response;
+        if (film_type == type_negative) {
+            response = density_response_negative(x_norm);
+        } else if (film_type == type_positive) {
+            response = density_response_positive(x_norm);
+        } else {
+            response = tonal_zone_response(x_norm, shadows, midtones, highlights);
+        }
+        return make_float3(response, response, response);
+    }
+
+    // Calculate density response based on film type
+    float density_response;
+    if (film_type == type_negative) {
+        density_response = density_response_negative(lum);
+    } else if (film_type == type_positive) {
+        density_response = density_response_positive(lum);
+    } else {
+        // Custom mode uses user-defined tonal zones
+        density_response = tonal_zone_response(lum, shadows, midtones, highlights);
+    }
+
+    // Resolution-aware grain size
+    float effective_size = resolution_scale(p_Width, p_Height, grain_size);
+
+    // Generate seeds for each channel (independent in film)
+    unsigned int base_seed = animate ? (unsigned int)seed : 12345u;
+    unsigned int seed_r = hash_u32(base_seed + 1u);
+    unsigned int seed_g = hash_u32(base_seed + 2u);
+    unsigned int seed_b = hash_u32(base_seed + 3u);
+
+    // Generate grain with AR correlation
+    float3 grain = ar_grain_sample(p_X, p_Y, seed_r, seed_g, seed_b,
+                                    ar_correlation, effective_size);
+
+    // Apply density response
+    grain = grain * density_response;
+
+    // Apply overall amount
+    float base_strength = amount * 0.05f;  // Scale to reasonable range
+    grain = grain * base_strength;
+
+    // Handle chroma grain
+    // Film grain is independent per channel, but we allow control over
+    // the color variation (chroma) vs luminance-only grain
+    float grain_lum = (grain.x + grain.y + grain.z) / 3.0f;
+    float3 grain_chroma = grain - make_float3(grain_lum, grain_lum, grain_lum);
+    grain = make_float3(grain_lum, grain_lum, grain_lum) + grain_chroma * chroma;
+
+    // RGB balance - shift grain color balance
+    // Negative = more blue grain, Positive = more red/yellow grain
+    if (rgb_balance != 0.0f) {
+        grain.x *= (1.0f + rgb_balance * 0.3f);
+        grain.z *= (1.0f - rgb_balance * 0.3f);
+    }
+
+    // Sharpness control - affects how "crisp" the grain appears
+    // Lower sharpness = grain affects fewer extreme values
+    float sharp_scale = lerpf(0.5f, 1.0f, sharpness);
+    grain = grain * sharp_scale;
+
+    // Show grain only mode (debug)
+    if (show_grain) {
+        float3 grain_vis = grain * 10.0f + make_float3(0.5f, 0.5f, 0.5f);
+        return grain_vis;
+    }
+
+    // Apply grain to image
+    float3 result;
+    if (process_space == space_linear) {
+        // Apply in linear - more physically accurate
+        // Grain in film is an additive process on density/transmission
+        result = linear_rgb + grain;
+        result = make_float3(_fmaxf(result.x, 0.0f), _fmaxf(result.y, 0.0f), _fmaxf(result.z, 0.0f));
+        result = linear_to_di_f3(result);
+    } else {
+        // Apply in log space - often visually preferable
+        // Grain appears more uniform across tonal range
+        result = rgb + grain;
+    }
+
+    return result;
+}

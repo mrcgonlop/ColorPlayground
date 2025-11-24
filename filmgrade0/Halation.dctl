@@ -1,0 +1,368 @@
+/*----------------------------------------------------------------------
+    Halation - Physical Film Halation Emulation
+    v0.1.0
+
+    Emulates the optical phenomenon where bright light penetrates film
+    emulsion layers, reflects off the anti-halation layer, and scatters
+    back primarily into the red layer (and partially green for very
+    bright sources).
+
+    Input: DaVinci Wide Gamut / DaVinci Intermediate (Log)
+    Output: DaVinci Wide Gamut / DaVinci Intermediate (Log)
+
+    Based on research from:
+    - Thatcher Freeman's halation DCTL (exponential falloff concept)
+    - Dehancer's multi-layer scatter model
+    - Physical film layer structure (Blue -> Green -> Red from lens)
+
+    IMPORTANT: This DCTL uses iterative box blur approximation.
+    For best results, apply in linear light (internal conversion provided).
+----------------------------------------------------------------------*/
+
+// ============================================================================
+// MATH HELPERS
+// ============================================================================
+
+__DEVICE__ float clampf(float x, float lo, float hi) {
+    return _fmaxf(lo, _fminf(x, hi));
+}
+
+__DEVICE__ float3 clampf3(float3 v, float lo, float hi) {
+    return make_float3(clampf(v.x, lo, hi), clampf(v.y, lo, hi), clampf(v.z, lo, hi));
+}
+
+__DEVICE__ float lerpf(float a, float b, float t) {
+    return a + t * (b - a);
+}
+
+__DEVICE__ float3 lerpf3(float3 a, float3 b, float t) {
+    return make_float3(lerpf(a.x, b.x, t), lerpf(a.y, b.y, t), lerpf(a.z, b.z, t));
+}
+
+__DEVICE__ float max3(float x, float y, float z) {
+    return _fmaxf(x, _fmaxf(y, z));
+}
+
+// ============================================================================
+// LOG ENCODING - DaVinci Intermediate
+// ============================================================================
+
+__DEVICE__ float di_to_linear(float x) {
+    const float A = 0.0075f;
+    const float B = 7.0f;
+    const float C = 0.07329248f;
+    const float M = 10.44426855f;
+    const float LOG_CUT = 0.02740668f;
+    return x <= LOG_CUT ? x / M : _exp2f(x / C - B) - A;
+}
+
+__DEVICE__ float linear_to_di(float x) {
+    const float A = 0.0075f;
+    const float B = 7.0f;
+    const float C = 0.07329248f;
+    const float M = 10.44426855f;
+    const float LIN_CUT = 0.00262409f;
+    return x <= LIN_CUT ? x * M : (_log2f(x + A) + B) * C;
+}
+
+__DEVICE__ float3 di_to_linear_f3(float3 v) {
+    return make_float3(di_to_linear(v.x), di_to_linear(v.y), di_to_linear(v.z));
+}
+
+__DEVICE__ float3 linear_to_di_f3(float3 v) {
+    return make_float3(linear_to_di(v.x), linear_to_di(v.y), linear_to_di(v.z));
+}
+
+// ============================================================================
+// LUMINANCE
+// ============================================================================
+
+// DaVinci Wide Gamut luminance weights
+#define DWG_Y make_float3(0.274118483067f, 0.873631775379f, -0.147750422359f)
+
+__DEVICE__ float luminance_dwg(float3 rgb) {
+    return rgb.x * DWG_Y.x + rgb.y * DWG_Y.y + rgb.z * DWG_Y.z;
+}
+
+// ============================================================================
+// THRESHOLD FUNCTIONS
+// ============================================================================
+
+__DEVICE__ float soft_threshold(float x, float threshold, float softness) {
+    // Soft threshold with smooth falloff
+    // Returns 0 below threshold, ramps up smoothly above
+    if (x <= threshold) return 0.0f;
+    float excess = x - threshold;
+    float soft = softness * threshold + 0.001f;
+    return excess / (excess + soft);
+}
+
+__DEVICE__ float3 extract_bright(float3 rgb, float threshold, float softness) {
+    // Extract bright areas based on luminance with per-channel weighting
+    float lum = luminance_dwg(rgb);
+    float mask = soft_threshold(lum, threshold, softness);
+
+    // Weight by how much each channel exceeds threshold
+    float3 excess = make_float3(
+        _fmaxf(0.0f, rgb.x - threshold * 0.8f),
+        _fmaxf(0.0f, rgb.y - threshold * 0.9f),
+        _fmaxf(0.0f, rgb.z - threshold)
+    );
+
+    return excess * mask;
+}
+
+// ============================================================================
+// HALATION COLOR MIXING
+// ============================================================================
+
+__DEVICE__ float3 halation_color_mix(float3 bright, float red_orange_mix, float green_bleed) {
+    // Mix halation color between pure red and orange (red + green)
+    // red_orange_mix: 0 = pure red, 1 = orange
+    // green_bleed: additional green contribution for very bright sources
+
+    float r = bright.x + bright.y * 0.3f + bright.z * 0.1f;  // Red gets contribution from all
+    float g = bright.y * green_bleed + bright.x * red_orange_mix * 0.5f;  // Green from mix
+    float b = 0.0f;  // Blue layer doesn't receive reflected light
+
+    return make_float3(r, g, b);
+}
+
+// ============================================================================
+// EXPONENTIAL BLUR KERNEL (Single-pass approximation)
+// ============================================================================
+
+// For a proper halation, we need spatial blur which requires texture access.
+// In DCTL without ResolveFX spatial access, we simulate the EFFECT of blur
+// using a multi-scale approach based on the input pixel and its exposure.
+//
+// This creates a "glow" effect that approximates halation behavior.
+// For true spatial blur, this would need to be a ResolveFX or use
+// Resolve's built-in blur before/after this DCTL.
+
+__DEVICE__ float exponential_falloff(float distance, float radius) {
+    // Exponential falloff is more physically accurate than Gaussian
+    // for light scattering in film emulsion
+    return _expf(-distance / _fmaxf(radius, 0.001f));
+}
+
+// ============================================================================
+// UI PARAMETERS
+// ============================================================================
+
+// Main Controls
+DEFINE_UI_PARAMS(enable, Enable Halation, DCTLUI_CHECK_BOX, 1)
+DEFINE_UI_PARAMS(intensity, Intensity, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(threshold, Threshold, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(softness, Threshold Softness, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+
+// Blur Size (relative to image - affects the "glow" spread)
+DEFINE_UI_PARAMS(blur_size, Blur Size, DCTLUI_SLIDER_FLOAT, 0.02, 0.001, 0.1, 0.001)
+
+// Color Controls
+DEFINE_UI_PARAMS(red_orange, Red-Orange Mix, DCTLUI_SLIDER_FLOAT, 0.3, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(green_bleed, Green Bleed, DCTLUI_SLIDER_FLOAT, 0.15, 0.0, 0.5, 0.01)
+DEFINE_UI_PARAMS(saturation, Halation Saturation, DCTLUI_SLIDER_FLOAT, 0.8, 0.0, 1.5, 0.01)
+
+// Per-Channel Blur Radius Multipliers (Red scatters most, Blue least)
+DEFINE_UI_PARAMS(red_mult, Red Radius Mult, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 2.0, 0.01)
+DEFINE_UI_PARAMS(green_mult, Green Radius Mult, DCTLUI_SLIDER_FLOAT, 0.7, 0.0, 1.5, 0.01)
+
+// Blend Mode
+DEFINE_UI_PARAMS(blend_mode, Blend Mode, DCTLUI_COMBO_BOX, 0, {blend_add, blend_screen, blend_soft}, {Additive, Screen, Soft Light})
+
+// Debug
+DEFINE_UI_PARAMS(show_halation, Show Halation Only, DCTLUI_CHECK_BOX, 0)
+
+// ============================================================================
+// BLUR APPROXIMATION USING BOX BLUR ITERATION
+// ============================================================================
+
+// Since DCTL doesn't have native texture sampling for arbitrary offsets,
+// we implement halation by sampling neighboring pixels using the
+// __TEXTURE_ACCESS__ macro pattern that some DCTLs use.
+//
+// However, the standard approach for spatial effects in DCTL is to:
+// 1. Use this as a "preparation" pass to extract and color the halation
+// 2. Apply Resolve's built-in blur
+// 3. Use a second DCTL to blend
+//
+// For a self-contained solution, we'll implement a multi-sample approach
+// that reads from the input texture at offsets.
+
+__DEVICE__ float3 sample_pixel(__TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE__ p_TexB,
+                                int x, int y, int width, int height) {
+    // Clamp coordinates to image bounds
+    x = _clamp(x, 0, width - 1);
+    y = _clamp(y, 0, height - 1);
+
+    return make_float3(
+        _tex2D(p_TexR, x, y),
+        _tex2D(p_TexG, x, y),
+        _tex2D(p_TexB, x, y)
+    );
+}
+
+__DEVICE__ float3 blur_sample(__TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE__ p_TexB,
+                               int p_X, int p_Y, int p_Width, int p_Height,
+                               float radius_pixels, float threshold, float softness,
+                               float red_orange, float green_bleed) {
+    // Multi-sample blur approximation
+    // Uses concentric rings with exponential falloff weighting
+
+    if (radius_pixels < 1.0f) {
+        float3 center = sample_pixel(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height);
+        center = di_to_linear_f3(center);
+        float3 bright = extract_bright(center, threshold, softness);
+        return halation_color_mix(bright, red_orange, green_bleed);
+    }
+
+    float3 accumulated = make_float3(0.0f, 0.0f, 0.0f);
+    float total_weight = 0.0f;
+
+    // Sample in rings - more samples for larger blur
+    int num_rings = (int)_fminf(_fmaxf(radius_pixels / 2.0f, 2.0f), 8.0f);
+    int samples_per_ring = 8;
+
+    for (int ring = 0; ring <= num_rings; ring++) {
+        float ring_radius = (float)ring / (float)num_rings * radius_pixels;
+        float weight = exponential_falloff(ring_radius, radius_pixels * 0.5f);
+
+        if (ring == 0) {
+            // Center sample
+            float3 center = sample_pixel(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height);
+            center = di_to_linear_f3(center);
+            float3 bright = extract_bright(center, threshold, softness);
+            float3 colored = halation_color_mix(bright, red_orange, green_bleed);
+            accumulated = accumulated + colored * weight;
+            total_weight += weight;
+        } else {
+            // Ring samples
+            for (int i = 0; i < samples_per_ring; i++) {
+                float angle = (float)i / (float)samples_per_ring * 6.28318530718f;
+                int ox = (int)(ring_radius * _cosf(angle));
+                int oy = (int)(ring_radius * _sinf(angle));
+
+                float3 s = sample_pixel(p_TexR, p_TexG, p_TexB, p_X + ox, p_Y + oy, p_Width, p_Height);
+                s = di_to_linear_f3(s);
+                float3 bright = extract_bright(s, threshold, softness);
+                float3 colored = halation_color_mix(bright, red_orange, green_bleed);
+
+                accumulated = accumulated + colored * weight;
+                total_weight += weight;
+            }
+        }
+    }
+
+    if (total_weight > 0.0f) {
+        accumulated = accumulated / total_weight;
+    }
+
+    return accumulated;
+}
+
+// ============================================================================
+// BLEND MODES
+// ============================================================================
+
+__DEVICE__ float3 blend_screen_f3(float3 base, float3 blend) {
+    return make_float3(
+        1.0f - (1.0f - base.x) * (1.0f - blend.x),
+        1.0f - (1.0f - base.y) * (1.0f - blend.y),
+        1.0f - (1.0f - base.z) * (1.0f - blend.z)
+    );
+}
+
+__DEVICE__ float blend_soft_light(float base, float blend) {
+    if (blend <= 0.5f) {
+        return base - (1.0f - 2.0f * blend) * base * (1.0f - base);
+    } else {
+        float d = (base <= 0.25f) ?
+            ((16.0f * base - 12.0f) * base + 4.0f) * base :
+            _sqrtf(base);
+        return base + (2.0f * blend - 1.0f) * (d - base);
+    }
+}
+
+__DEVICE__ float3 blend_soft_light_f3(float3 base, float3 blend) {
+    return make_float3(
+        blend_soft_light(base.x, blend.x),
+        blend_soft_light(base.y, blend.y),
+        blend_soft_light(base.z, blend.z)
+    );
+}
+
+// ============================================================================
+// MAIN TRANSFORM
+// ============================================================================
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y,
+                            __TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE__ p_TexB) {
+
+    // Read current pixel
+    float3 rgb = make_float3(
+        _tex2D(p_TexR, p_X, p_Y),
+        _tex2D(p_TexG, p_X, p_Y),
+        _tex2D(p_TexB, p_X, p_Y)
+    );
+
+    if (!enable) {
+        return rgb;
+    }
+
+    // Convert to linear for processing
+    float3 linear_rgb = di_to_linear_f3(rgb);
+
+    // Calculate blur radius in pixels
+    float base_radius = blur_size * (float)_fminf(p_Width, p_Height);
+
+    // Sample halation with per-channel radius multipliers
+    // Red channel gets the largest blur (scatters most in film)
+    float3 halation_r = blur_sample(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height,
+                                     base_radius * red_mult, threshold, softness,
+                                     red_orange, green_bleed);
+
+    // Green channel gets smaller blur
+    float3 halation_g = blur_sample(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height,
+                                     base_radius * green_mult, threshold, softness,
+                                     red_orange, green_bleed);
+
+    // Combine: use red channel's red, green channel's green
+    float3 halation = make_float3(
+        halation_r.x,
+        halation_g.y * 0.5f + halation_r.y * 0.5f,
+        0.0f
+    );
+
+    // Apply intensity
+    halation = halation * intensity;
+
+    // Apply saturation control
+    float halation_lum = halation.x * 0.3f + halation.y * 0.7f;
+    halation = lerpf3(make_float3(halation_lum, halation_lum, halation_lum), halation, saturation);
+
+    // Debug: show halation only
+    if (show_halation) {
+        return linear_to_di_f3(halation);
+    }
+
+    // Blend halation with original
+    float3 result;
+    if (blend_mode == blend_add) {
+        result = linear_rgb + halation;
+    } else if (blend_mode == blend_screen) {
+        // Screen blend in linear - need to handle carefully
+        float3 normalized_hal = halation / (halation + make_float3(1.0f, 1.0f, 1.0f));
+        result = blend_screen_f3(linear_rgb, normalized_hal);
+    } else {
+        // Soft light
+        float3 normalized_hal = halation / (halation + make_float3(1.0f, 1.0f, 1.0f));
+        result = blend_soft_light_f3(linear_rgb, normalized_hal);
+    }
+
+    // Clamp negatives
+    result = make_float3(_fmaxf(result.x, 0.0f), _fmaxf(result.y, 0.0f), _fmaxf(result.z, 0.0f));
+
+    // Convert back to log
+    return linear_to_di_f3(result);
+}
