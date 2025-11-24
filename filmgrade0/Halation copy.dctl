@@ -1,0 +1,252 @@
+/*----------------------------------------------------------------------
+    Halation - Physical Film Halation Emulation
+    v0.1.0
+
+    Emulates the optical phenomenon where bright light penetrates film
+    emulsion layers, reflects off the anti-halation layer, and scatters
+    back primarily into the red layer (and partially green for very
+    bright sources).
+
+    Input: DaVinci Wide Gamut / DaVinci Intermediate (Log)
+    Output: DaVinci Wide Gamut / DaVinci Intermediate (Log)
+
+    Based on research from:
+    - hotgluebanjo's halation DCTL (exponential blur kernel)
+    - Thatcher Freeman's halation concepts
+    - Dehancer's multi-layer scatter model
+    - Physical film layer structure (Blue -> Green -> Red from lens)
+
+    NOTE: This DCTL requires texture access for spatial blur.
+----------------------------------------------------------------------*/
+
+// ============================================================================
+// UI PARAMETERS
+// ============================================================================
+
+DEFINE_UI_PARAMS(enable, Enable Halation, DCTLUI_CHECK_BOX, 1)
+DEFINE_UI_PARAMS(size, Size, DCTLUI_SLIDER_FLOAT, 2.0, 0.0, 10.0, 0.01)
+DEFINE_UI_PARAMS(intensity, Intensity, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(threshold, Threshold, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(softness, Threshold Softness, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+
+DEFINE_UI_PARAMS(color_mix, Red-Orange Mix, DCTLUI_SLIDER_FLOAT, 0.15, 0.0, 0.5, 0.001)
+DEFINE_UI_PARAMS(saturation, Halation Saturation, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.5, 0.01)
+
+DEFINE_UI_PARAMS(method, Method, DCTLUI_COMBO_BOX, 0, {METHOD_ADDITIVE, METHOD_PROOSA, METHOD_MINUTH}, {Additive Threshold, Proosa, Minuth})
+
+DEFINE_UI_PARAMS(show_halation, Show Halation Only, DCTLUI_CHECK_BOX, 0)
+
+// ============================================================================
+// LOG ENCODING - DaVinci Intermediate
+// ============================================================================
+
+__DEVICE__ float di_to_linear(float x) {
+    const float A = 0.0075f;
+    const float B = 7.0f;
+    const float C = 0.07329248f;
+    const float M = 10.44426855f;
+    const float LOG_CUT = 0.02740668f;
+    return x <= LOG_CUT ? x / M : _exp2f(x / C - B) - A;
+}
+
+__DEVICE__ float linear_to_di(float x) {
+    const float A = 0.0075f;
+    const float B = 7.0f;
+    const float C = 0.07329248f;
+    const float M = 10.44426855f;
+    const float LIN_CUT = 0.00262409f;
+    return x <= LIN_CUT ? x * M : (_log2f(x + A) + B) * C;
+}
+
+__DEVICE__ float3 di_to_linear_f3(float3 v) {
+    return make_float3(di_to_linear(v.x), di_to_linear(v.y), di_to_linear(v.z));
+}
+
+__DEVICE__ float3 linear_to_di_f3(float3 v) {
+    return make_float3(linear_to_di(v.x), linear_to_di(v.y), linear_to_di(v.z));
+}
+
+// ============================================================================
+// TEXTURE SAMPLING
+// ============================================================================
+
+__DEVICE__ float3 sample_tex(__TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE__ p_TexB, int p_X, int p_Y) {
+    return make_float3(
+        _tex2D(p_TexR, p_X, p_Y),
+        _tex2D(p_TexG, p_X, p_Y),
+        _tex2D(p_TexB, p_X, p_Y)
+    );
+}
+
+// ============================================================================
+// EXPONENTIAL BLUR KERNEL
+// ============================================================================
+
+__DEVICE__ float exp_kernel(float x, float y, float r0) {
+    return _expf(-_sqrtf(x * x + y * y) / r0);
+}
+
+__DEVICE__ float3 exp_blur(__TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE__ p_TexB,
+                            int p_X, int p_Y, float size) {
+    // Radius captures most of the falloff
+    int radius = (int)_ceilf(4.5f * size);
+    float3 sum = make_float3(0.0f, 0.0f, 0.0f);
+    float weight_sum = 0.0f;
+
+    for (int i = -radius; i <= radius; i++) {
+        for (int j = -radius; j <= radius; j++) {
+            float weight = exp_kernel((float)i, (float)j, size);
+            float3 s = sample_tex(p_TexR, p_TexG, p_TexB, p_X + i, p_Y + j);
+            sum.x += weight * s.x;
+            sum.y += weight * s.y;
+            sum.z += weight * s.z;
+            weight_sum += weight;
+        }
+    }
+
+    if (weight_sum > 0.0f) {
+        sum.x /= weight_sum;
+        sum.y /= weight_sum;
+        sum.z /= weight_sum;
+    }
+
+    return sum;
+}
+
+// Blur with threshold - only blur bright areas
+__DEVICE__ float3 exp_blur_threshold(__TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE__ p_TexB,
+                                      int p_X, int p_Y, float size, float thresh, float soft) {
+    int radius = (int)_ceilf(4.5f * size);
+    float3 sum = make_float3(0.0f, 0.0f, 0.0f);
+    float weight_sum = 0.0f;
+
+    for (int i = -radius; i <= radius; i++) {
+        for (int j = -radius; j <= radius; j++) {
+            float weight = exp_kernel((float)i, (float)j, size);
+            float3 s = sample_tex(p_TexR, p_TexG, p_TexB, p_X + i, p_Y + j);
+
+            // Convert to linear for threshold
+            float3 lin = di_to_linear_f3(s);
+
+            // Luminance
+            float lum = lin.x * 0.2126f + lin.y * 0.7152f + lin.z * 0.0722f;
+
+            // Soft threshold mask
+            float mask = 0.0f;
+            if (lum > thresh) {
+                float excess = lum - thresh;
+                float soft_range = soft * thresh + 0.001f;
+                mask = excess / (excess + soft_range);
+            }
+
+            // Extract only bright parts
+            float3 bright = make_float3(lin.x * mask, lin.y * mask, lin.z * mask);
+
+            sum.x += weight * bright.x;
+            sum.y += weight * bright.y;
+            sum.z += weight * bright.z;
+            weight_sum += weight;
+        }
+    }
+
+    if (weight_sum > 0.0f) {
+        sum.x /= weight_sum;
+        sum.y /= weight_sum;
+        sum.z /= weight_sum;
+    }
+
+    return sum;
+}
+
+// ============================================================================
+// MAIN TRANSFORM
+// ============================================================================
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y,__TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE__ p_TexB) {
+
+    float3 rgb = sample_tex(p_TexR, p_TexG, p_TexB, p_X, p_Y);
+
+    if (!enable || size < 0.001f) {
+        return rgb;
+    }
+
+    float3 linear_rgb = di_to_linear_f3(rgb);
+    float3 result, halation, blurred;
+
+    if (method == METHOD_ADDITIVE) {
+        // Additive method with threshold - more control over what halates
+        halation = exp_blur_threshold(p_TexR, p_TexG, p_TexB, p_X, p_Y, size, threshold, softness);
+
+        // Apply halation color: primarily red, some green bleed
+        float3 colored = make_float3(
+            halation.x + halation.y * 0.3f + halation.z * 0.1f,
+            (halation.x * color_mix * 0.5f) + (halation.y * color_mix),
+            0.0f
+        );
+
+        // Apply saturation
+        float hal_lum = colored.x * 0.3f + colored.y * 0.7f;
+        colored.x = hal_lum + (colored.x - hal_lum) * saturation;
+        colored.y = hal_lum + (colored.y - hal_lum) * saturation;
+        colored.z = hal_lum + (colored.z - hal_lum) * saturation;
+
+        // Apply intensity and add to original
+        colored.x *= intensity;
+        colored.y *= intensity;
+        colored.z *= intensity;
+
+        if (show_halation) {
+            return linear_to_di_f3(colored);
+        }
+
+        result.x = linear_rgb.x + colored.x;
+        result.y = linear_rgb.y + colored.y;
+        result.z = linear_rgb.z + colored.z;
+
+    } else if (method == METHOD_PROOSA) {
+        // Proosa method - works in log space directly
+        blurred = exp_blur(p_TexR, p_TexG, p_TexB, p_X, p_Y, size);
+        float3 color = make_float3(1.0f, color_mix, 0.0f);
+
+        halation.x = rgb.x + (blurred.x * color.x);
+        halation.y = rgb.y + (blurred.y * color.y);
+        halation.z = rgb.z + (blurred.z * color.z);
+
+        result.x = halation.x / (color.x + 1.0f);
+        result.y = halation.y / (color.y + 1.0f);
+        result.z = halation.z / (color.z + 1.0f);
+
+        if (show_halation) {
+            return make_float3(blurred.x * color.x, blurred.y * color.y, blurred.z * color.z);
+        }
+
+        return result;
+
+    } else {
+        // Minuth method - frequency separation
+        blurred = exp_blur(p_TexR, p_TexG, p_TexB, p_X, p_Y, size);
+        float3 color = make_float3(0.7f, 1.0f - color_mix / 3.0f, 1.0f);
+
+        halation.x = (rgb.x - blurred.x) * color.x;
+        halation.y = (rgb.y - blurred.y) * color.y;
+        halation.z = (rgb.z - blurred.z) * color.z;
+
+        result.x = halation.x + blurred.x;
+        result.y = halation.y + blurred.y;
+        result.z = halation.z + blurred.z;
+
+        if (show_halation) {
+            float3 diff = make_float3(rgb.x - blurred.x, rgb.y - blurred.y, rgb.z - blurred.z);
+            return diff;
+        }
+
+        return result;
+    }
+
+    // Clamp negatives
+    result.x = _fmaxf(result.x, 0.0f);
+    result.y = _fmaxf(result.y, 0.0f);
+    result.z = _fmaxf(result.z, 0.0f);
+
+    return linear_to_di_f3(result);
+}
