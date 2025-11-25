@@ -263,14 +263,14 @@ __DEVICE__ float density_response_positive(float lum) {
 // TONAL ZONE RESPONSE (User-adjustable)
 // ============================================================================
 
-__DEVICE__ float tonal_zone_response(float lum, float shadows, float midtones, float highlights) {
+__DEVICE__ float tonal_zone_response(float lum, float shadows, float midtones, float highlights, float shadows_peak, float midtones_peak, float highlights_peak, float shadows_width, float midtones_width, float highlights_width) {
     // Allow user control over grain in each tonal zone
-    float shadow_weight = _expf(-_powf((lum - 0.05f) / 0.12f, 2.0f));
-    float mid_weight = _expf(-_powf((lum - 0.5f) / 0.25f, 2.0f));
-    float high_weight = _expf(-_powf((lum - 0.85f) / 0.15f, 2.0f));
+    float shadow_weight = _expf(-_powf((lum - shadows_peak) / shadows_width, 2.0f));
+    float mid_weight = _expf(-_powf((lum - midtones_peak) / midtones_width, 2.0f));
+    float high_weight = _expf(-_powf((lum - highlights_peak) / highlights_width, 2.0f));
 
     float response = shadow_weight * shadows + mid_weight * midtones + high_weight * highlights;
-    return clampf(response, 0.05f, 1.0f);
+    return clampf(response, 0.001f, 1.0f);
 }
 
 // ============================================================================
@@ -293,24 +293,32 @@ __DEVICE__ float resolution_scale(int width, int height, float target_grain_size
 
 // Main Controls
 DEFINE_UI_PARAMS(enable, Enable Grain, DCTLUI_CHECK_BOX, 1)
-DEFINE_UI_PARAMS(amount, Amount, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
-DEFINE_UI_PARAMS(grain_size, Grain Size, DCTLUI_SLIDER_FLOAT, 1.0, 0.25, 4.0, 0.01)
+DEFINE_UI_PARAMS(amount, Amount, DCTLUI_SLIDER_FLOAT, 0.6, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(grain_size, Grain Size, DCTLUI_SLIDER_FLOAT, 1.209, 0.25, 4.0, 0.01)
 
 // Film Type
-DEFINE_UI_PARAMS(film_type, Film Type, DCTLUI_COMBO_BOX, 0, {type_negative, type_positive, type_custom}, {Negative Film, Positive Film, Custom})
+DEFINE_UI_PARAMS(film_type, Film Type, DCTLUI_COMBO_BOX, 2, {type_negative, type_positive, type_custom}, {Negative Film, Positive Film, Custom})
 
 // Grain Character
-DEFINE_UI_PARAMS(ar_correlation, Grain Clumping, DCTLUI_SLIDER_FLOAT, 0.3, 0.0, 0.8, 0.01)
-DEFINE_UI_PARAMS(sharpness, Grain Sharpness, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(ar_correlation, Grain Clumping, DCTLUI_SLIDER_FLOAT, 0.8, 0.0, 0.8, 0.01)
+DEFINE_UI_PARAMS(sharpness, Grain Sharpness, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 1.0, 0.01)
 
 // Color
-DEFINE_UI_PARAMS(chroma, Chroma Grain, DCTLUI_SLIDER_FLOAT, 0.3, 0.0, 1.0, 0.01)
+DEFINE_UI_PARAMS(chroma, Chroma Grain, DCTLUI_SLIDER_FLOAT, 0.504, 0.0, 1.0, 0.01)
 DEFINE_UI_PARAMS(rgb_balance, RGB Balance, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.01)
 
 // Tonal Distribution (Custom mode)
-DEFINE_UI_PARAMS(shadows, Shadows, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 10.0, 0.01)
-DEFINE_UI_PARAMS(midtones, Midtones, DCTLUI_SLIDER_FLOAT, 0.6, 0.0, 10.0, 0.01)
-DEFINE_UI_PARAMS(highlights, Highlights, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 10.0, 0.01)
+DEFINE_UI_PARAMS(shadows, Shadows, DCTLUI_SLIDER_FLOAT, 1.32, -2.0, 2.0, 0.001)
+DEFINE_UI_PARAMS(midtones, Midtones, DCTLUI_SLIDER_FLOAT, 0.85, -2.0, 2.0, 0.001)
+DEFINE_UI_PARAMS(highlights, Highlights, DCTLUI_SLIDER_FLOAT, 0.01, -2.0, 2.0, 0.001)
+
+DEFINE_UI_PARAMS(shadows_peak, Shadows p, DCTLUI_SLIDER_FLOAT, 0.17, -2.0, 2.0, 0.001)
+DEFINE_UI_PARAMS(midtones_peak, Midtones p, DCTLUI_SLIDER_FLOAT, 0.01, -2.0, 2.0, 0.001)
+DEFINE_UI_PARAMS(highlights_peak, Highlights p, DCTLUI_SLIDER_FLOAT, 1.0, -2.0, 2.0, 0.001)
+
+DEFINE_UI_PARAMS(shadows_width, Shadows w, DCTLUI_SLIDER_FLOAT, -0.12, -2.0, 2.0, 0.001)
+DEFINE_UI_PARAMS(midtones_width, Midtones w, DCTLUI_SLIDER_FLOAT, 0.01, -2.0, 2.0, 0.001)
+DEFINE_UI_PARAMS(highlights_width, Highlights w, DCTLUI_SLIDER_FLOAT, -0.04, -2.0, 2.0, 0.001)
 
 // Animation
 DEFINE_UI_PARAMS(animate, Animate Grain, DCTLUI_CHECK_BOX, 1)
@@ -349,7 +357,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         } else if (film_type == type_positive) {
             response = density_response_positive(x_norm);
         } else {
-            response = tonal_zone_response(x_norm, shadows, midtones, highlights);
+            response = tonal_zone_response(x_norm, shadows, midtones, highlights, shadows_peak, midtones_peak, highlights_peak, shadows_width, midtones_width, highlights_width);
         }
         return make_float3(response, response, response);
     }
@@ -362,14 +370,14 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         density_response = density_response_positive(lum);
     } else {
         // Custom mode uses user-defined tonal zones
-        density_response = tonal_zone_response(lum, shadows, midtones, highlights);
+        density_response = tonal_zone_response(lum, shadows, midtones, highlights, shadows_peak, midtones_peak, highlights_peak, shadows_width, midtones_width, highlights_width);
     }
 
     // Resolution-aware grain size
     float effective_size = resolution_scale(p_Width, p_Height, grain_size);
 
     // Generate seeds for each channel (independent in film)
-    unsigned int base_seed = animate ? TIMELINE_FRAME_INDEX+1 :(unsigned int)seed;
+    unsigned int base_seed = animate ? TIMELINE_FRAME_INDEX :(unsigned int)seed;
     unsigned int seed_r = hash_u32(base_seed + 1u);
     unsigned int seed_g = hash_u32(base_seed + 2u);
     unsigned int seed_b = hash_u32(base_seed + 3u);
@@ -406,7 +414,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
 
     // Show grain only mode (debug)
     if (show_grain) {
-        float3 grain_vis = grain * 10.0f + make_float3(0.5f, 0.5f, 0.5f);
+        float3 grain_vis = grain * 10.0f + make_float3(0.0f, 0.0f, 0.0f);
         return grain_vis;
     }
 
