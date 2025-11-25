@@ -311,17 +311,17 @@ DEFINE_UI_PARAMS(chroma, Chroma Grain, DCTLUI_SLIDER_FLOAT, 0.504, 0.0, 1.0, 0.0
 DEFINE_UI_PARAMS(rgb_balance, RGB Balance, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.01)
 
 // Tonal Distribution (Custom mode)
-DEFINE_UI_PARAMS(shadows, Shadows, DCTLUI_SLIDER_FLOAT, 0.0, -3.0, 3.0, 0.001)
-DEFINE_UI_PARAMS(midtones, Midtones, DCTLUI_SLIDER_FLOAT, 2.00, -3.0, 3.0, 0.001)
-DEFINE_UI_PARAMS(highlights, Highlights, DCTLUI_SLIDER_FLOAT, 0.0, -3.0, 3.0, 0.001)
+DEFINE_UI_PARAMS(shadows, Shadows, DCTLUI_SLIDER_FLOAT, 0.0, -3.0, 3.0, 0.01)
+DEFINE_UI_PARAMS(midtones, Midtones, DCTLUI_SLIDER_FLOAT, 2.0, -3.0, 3.0, 0.01)
+DEFINE_UI_PARAMS(highlights, Highlights, DCTLUI_SLIDER_FLOAT, 0.0, -3.0, 3.0, 0.01)
 
-DEFINE_UI_PARAMS(shadows_peak, Shadows p, DCTLUI_SLIDER_FLOAT, -1.0, -1.0, 2.0, 0.001)
-DEFINE_UI_PARAMS(midtones_peak, Midtones p, DCTLUI_SLIDER_FLOAT, 1.37, -1.0, 2.0 0.001)
-DEFINE_UI_PARAMS(highlights_peak, Highlights p, DCTLUI_SLIDER_FLOAT, -1.0, -1.0, 2.0 0.001)
+DEFINE_UI_PARAMS(shadows_peak, Shadows p, DCTLUI_SLIDER_FLOAT, -1.0, -1.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(midtones_peak, Midtones p, DCTLUI_SLIDER_FLOAT, 1.37, -1.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(highlights_peak, Highlights p, DCTLUI_SLIDER_FLOAT, -1.0, -1.0, 2.0, 0.01)
 
 DEFINE_UI_PARAMS(shadows_width, Shadows w, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 2.0, 0.001)
 DEFINE_UI_PARAMS(midtones_width, Midtones w, DCTLUI_SLIDER_FLOAT, 0.627, 0.0, 2.0, 0.001)
-DEFINE_UI_PARAMS(highlights_width, Highlights w, DCTLUI_SLIDER_FLOAT, 0.00, 0.0, 2.0, 0.001)
+DEFINE_UI_PARAMS(highlights_width, Highlights w, DCTLUI_SLIDER_FLOAT, 0.0, 0.0, 2.0, 0.001)
 
 // Animation
 DEFINE_UI_PARAMS(animate, Animate Grain, DCTLUI_CHECK_BOX, 1)

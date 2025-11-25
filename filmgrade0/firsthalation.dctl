@@ -116,13 +116,38 @@ __DEVICE__ float3 extract_bright(float3 rgb, float threshold, float softness) {
 // HALATION COLOR MIXING
 // ============================================================================
 
-__DEVICE__ float3 halation_color_mix(float3 bright, float red_orange_mix, float green_bleed) {
+__DEVICE__ float3 halation_color_mix(float3 bright, float red_orange_mix, float green_bleed, float brightness, int auto_color_shift, float shift_thresh, float shift_int, float shift_pow) {
     // Mix halation color between pure red and orange (red + green)
-    // red_orange_mix: 0 = pure red, 1 = orange
+    // red_orange_mix: 0 = pure red, 1 = orange (base value or manual override)
     // green_bleed: additional green contribution for very bright sources
+    // brightness: luminance of the bright area for auto color shift
+    // Automatic shift: brighter sources → more orange/yellow (physically accurate)
+    float use_auto_shift;
+    if (auto_color_shift == 1) {
+        use_auto_shift = 1.0f;
+    } else {
+        use_auto_shift = 0.0f;
+    }
+
+    float final_red_orange = red_orange_mix;
+    float final_green_bleed = green_bleed;
+
+    if (use_auto_shift > 0.5f) {
+        // Calculate how much brighter this source is above the shift threshold
+        float brightness_excess = _fmaxf(0.0f, brightness - shift_thresh);
+
+        // Apply power curve and intensity to control the shift response
+        float shift_amount = _powf(brightness_excess / _fmaxf(shift_thresh, 0.01f), shift_pow) * shift_int;
+        shift_amount = _fminf(shift_amount, 2.0f);  // Cap the shift
+
+        // Brighter sources get more orange (increased red_orange_mix)
+        // and more green bleed (simulating deeper penetration into green layer)
+        final_red_orange = _fminf(red_orange_mix + shift_amount * 0.5f, 1.0f);
+        final_green_bleed = _fminf(green_bleed + shift_amount * 0.3f, 1.0f);
+    }
 
     float r = bright.x + bright.y * 0.3f + bright.z * 0.1f;  // Red gets contribution from all
-    float g = bright.y * green_bleed + bright.x * red_orange_mix * 0.5f;  // Green from mix
+    float g = bright.y * final_green_bleed + bright.x * final_red_orange * 0.5f;  // Green from mix
     float b = 0.0f;  // Blue layer doesn't receive reflected light
 
     return make_float3(r, g, b);
@@ -163,6 +188,12 @@ DEFINE_UI_PARAMS(blur_size, Blur Size, DCTLUI_SLIDER_FLOAT, 0.02, 0.001, 0.1, 0.
 DEFINE_UI_PARAMS(red_orange, Red-Orange Mix, DCTLUI_SLIDER_FLOAT, 0.3, 0.0, 1.0, 0.01)
 DEFINE_UI_PARAMS(green_bleed, Green Bleed, DCTLUI_SLIDER_FLOAT, 0.15, 0.0, 0.5, 0.01)
 DEFINE_UI_PARAMS(saturation, Halation Saturation, DCTLUI_SLIDER_FLOAT, 0.8, 0.0, 1.5, 0.01)
+
+// Brightness-Dependent Color Shift
+DEFINE_UI_PARAMS(auto_color_shift, Auto Color by Brightness, DCTLUI_CHECK_BOX, 1)
+DEFINE_UI_PARAMS(shift_threshold, Shift Start Threshold, DCTLUI_SLIDER_FLOAT, 0.5, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(shift_intensity, Shift Intensity, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 2.0, 0.01)
+DEFINE_UI_PARAMS(shift_curve, Shift Curve Power, DCTLUI_SLIDER_FLOAT, 1.5, 0.5, 3.0, 0.1)
 
 // Per-Channel Blur Radius Multipliers (Red scatters most, Blue least)
 DEFINE_UI_PARAMS(red_mult, Red Radius Mult, DCTLUI_SLIDER_FLOAT, 1.0, 0.5, 2.0, 0.01)
@@ -209,7 +240,8 @@ __DEVICE__ float3 sample_pixel(__TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE
 __DEVICE__ float3 blur_sample(__TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE__ p_TexB,
                                int p_X, int p_Y, int p_Width, int p_Height,
                                float radius_pixels, float threshold, float softness,
-                               float red_orange, float green_bleed, int samples_per_ring, float exp_fall_off) {
+                               float red_orange, float green_bleed, int samples_per_ring, float exp_fall_off,
+                               int auto_shift, float shift_thresh, float shift_int, float shift_pow) {
     // Multi-sample blur approximation
     // Uses concentric rings with exponential falloff weighting
 
@@ -217,7 +249,9 @@ __DEVICE__ float3 blur_sample(__TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE_
         float3 center = sample_pixel(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height);
         center = di_to_linear_f3(center);
         float3 bright = extract_bright(center, threshold, softness);
-        return halation_color_mix(bright, red_orange, green_bleed);
+        float brightness = luminance_dwg(center);
+        float3 outhalation = halation_color_mix(bright, red_orange, green_bleed, brightness, auto_shift, shift_thresh, shift_int, shift_pow);
+        return outhalation;
     }
 
     float3 accumulated = make_float3(0.0f, 0.0f, 0.0f);
@@ -235,7 +269,8 @@ __DEVICE__ float3 blur_sample(__TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE_
             float3 center = sample_pixel(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height);
             center = di_to_linear_f3(center);
             float3 bright = extract_bright(center, threshold, softness);
-            float3 colored = halation_color_mix(bright, red_orange, green_bleed);
+            float brightness = luminance_dwg(center);
+            float3 colored = halation_color_mix(bright, red_orange, green_bleed, brightness, auto_shift, shift_thresh, shift_int, shift_pow);
             accumulated = accumulated + colored * weight;
             total_weight += weight;
         } else {
@@ -248,7 +283,8 @@ __DEVICE__ float3 blur_sample(__TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE_
                 float3 s = sample_pixel(p_TexR, p_TexG, p_TexB, p_X + ox, p_Y + oy, p_Width, p_Height);
                 s = di_to_linear_f3(s);
                 float3 bright = extract_bright(s, threshold, softness);
-                float3 colored = halation_color_mix(bright, red_orange, green_bleed);
+                float brightness = luminance_dwg(s);
+                float3 colored = halation_color_mix(bright, red_orange, green_bleed, brightness, auto_shift, shift_thresh, shift_int, shift_pow);
 
                 accumulated = accumulated + colored * weight;
                 total_weight += weight;
@@ -321,12 +357,14 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, __TEXTU
     // Red channel gets the largest blur (scatters most in film)
     float3 halation_r = blur_sample(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height,
                                      base_radius * red_mult, threshold, softness,
-                                     red_orange, green_bleed, samples_per_r, exp_fall_off);
+                                     red_orange, green_bleed, samples_per_r, exp_fall_off,
+                                     auto_color_shift, shift_threshold, shift_intensity, shift_curve);
 
     // Green channel gets smaller blur
     float3 halation_g = blur_sample(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height,
                                      base_radius * green_mult, threshold, softness,
-                                     red_orange, green_bleed, samples_per_r, exp_fall_off);
+                                     red_orange, green_bleed, samples_per_r, exp_fall_off,
+                                     auto_color_shift, shift_threshold, shift_intensity, shift_curve);
 
     // Combine: use red channel's red, green channel's green
     float3 halation = make_float3(
